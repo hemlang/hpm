@@ -148,13 +148,14 @@ export fn prune(lockfile, manifest) {
         return { lockfile: lockfile, removed: [] };
     }
 
-    // Declare loop variable once
+    // Declare loop variables once
     let i = 0;
+    let keys = [];
 
     // Collect all root dependencies from manifest
     let roots = [];
     if (manifest.dependencies != null) {
-        let keys = manifest.dependencies.keys();
+        keys = manifest.dependencies.keys();
         i = 0;
         while (i < keys.length) {
             roots.push(keys[i]);
@@ -162,7 +163,7 @@ export fn prune(lockfile, manifest) {
         }
     }
     if (manifest.devDependencies != null) {
-        let keys = manifest.devDependencies.keys();
+        keys = manifest.devDependencies.keys();
         i = 0;
         while (i < keys.length) {
             roots.push(keys[i]);
@@ -199,10 +200,10 @@ export fn prune(lockfile, manifest) {
 
         let entry = lockfile.dependencies[pkg_name];
         if (entry != null && entry.dependencies != null) {
-            let dep_keys = entry.dependencies.keys();
+            keys = entry.dependencies.keys();
             i = 0;
-            while (i < dep_keys.length) {
-                let dep = dep_keys[i];
+            while (i < keys.length) {
+                let dep = keys[i];
                 if (reachable[dep] != true && lockfile.dependencies[dep] != null) {
                     reachable[dep] = true;
                     queue.push(dep);
@@ -215,10 +216,10 @@ export fn prune(lockfile, manifest) {
     // Remove unreachable packages
     let removed = [];
     let new_deps = {};
-    let all_keys = lockfile.dependencies.keys();
+    keys = lockfile.dependencies.keys();
     i = 0;
-    while (i < all_keys.length) {
-        let key = all_keys[i];
+    while (i < keys.length) {
+        let key = keys[i];
         if (reachable[key] == true) {
             new_deps[key] = lockfile.dependencies[key];
         } else {
