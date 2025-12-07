@@ -1,19 +1,19 @@
 // hpm - Global cache management
 
 import { exists, read_file, write_file, make_dir, list_dir, remove_file, remove_dir, is_dir } from "@stdlib/fs";
-import { getenv } from "@stdlib/env";
+import * as env from "@stdlib/env";
 import { parse, stringify, pretty } from "@stdlib/json";
 
 // Get cache directory path
 export fn get_cache_dir(): string {
     // Check environment variable first
-    let cache_dir = getenv("HPM_CACHE_DIR");
+    let cache_dir = env.getenv("HPM_CACHE_DIR");
     if (cache_dir != null && cache_dir.length > 0) {
         return cache_dir;
     }
 
     // Default to ~/.hpm/cache
-    let home = getenv("HOME");
+    let home = env.getenv("HOME");
     if (home == null) {
         home = ".";
     }
@@ -23,7 +23,7 @@ export fn get_cache_dir(): string {
 
 // Get config directory path
 export fn get_config_dir(): string {
-    let home = getenv("HOME");
+    let home = env.getenv("HOME");
     if (home == null) {
         home = ".";
     }

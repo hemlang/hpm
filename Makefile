@@ -6,9 +6,16 @@ BINDIR ?= $(PREFIX)/bin
 HEMLOCK ?= hemlock
 
 # Default target
-all: build
+all: hpm
 
-# Build the bundled executable
+# Create hpm wrapper script (runs from source)
+hpm:
+	@echo '#!/bin/sh' > hpm
+	@echo 'exec hemlock "$(CURDIR)/src/main.hml" "$$@"' >> hpm
+	@chmod +x hpm
+	@echo "Created ./hpm wrapper script"
+
+# Build the bundled executable (NOTE: bundler has dedup bug, use install-dev instead)
 build:
 	$(HEMLOCK) --bundle src/main.hml -o hpm.hmlc
 
@@ -16,23 +23,23 @@ build:
 test:
 	$(HEMLOCK) test/run.hml
 
-# Install hpm to system
-install: build
+# Install hpm to system (runs from source - recommended)
+install:
+	@mkdir -p $(BINDIR)
+	@echo '#!/bin/sh' > $(BINDIR)/hpm
+	@echo 'exec hemlock "$(CURDIR)/src/main.hml" "$$@"' >> $(BINDIR)/hpm
+	@chmod +x $(BINDIR)/hpm
+	@echo "hpm installed to $(BINDIR)/hpm"
+
+# Install hpm using bundled version (has issues due to bundler bug)
+install-bundle: build
 	@mkdir -p $(BINDIR)
 	@echo '#!/bin/sh' > $(BINDIR)/hpm
 	@echo 'exec $(HEMLOCK) "$(PREFIX)/lib/hpm/hpm.hmlc" "$$@"' >> $(BINDIR)/hpm
 	@chmod +x $(BINDIR)/hpm
 	@mkdir -p $(PREFIX)/lib/hpm
 	@cp hpm.hmlc $(PREFIX)/lib/hpm/
-	@echo "hpm installed to $(BINDIR)/hpm"
-
-# Install hpm (alternative: run directly from source)
-install-dev:
-	@mkdir -p $(BINDIR)
-	@echo '#!/bin/sh' > $(BINDIR)/hpm
-	@echo 'exec $(HEMLOCK) "$(CURDIR)/src/main.hml" "$$@"' >> $(BINDIR)/hpm
-	@chmod +x $(BINDIR)/hpm
-	@echo "hpm (dev) installed to $(BINDIR)/hpm"
+	@echo "hpm (bundled) installed to $(BINDIR)/hpm"
 
 # Uninstall hpm from system
 uninstall:
@@ -42,7 +49,7 @@ uninstall:
 
 # Clean build artifacts
 clean:
-	@rm -f hpm.hmlc
+	@rm -f hpm.hmlc hpm
 	@echo "Cleaned build artifacts"
 
 # Run a specific test file
@@ -61,21 +68,21 @@ test-cache:
 # Show help
 help:
 	@echo "hpm Makefile targets:"
-	@echo "  all          - Build hpm (default)"
-	@echo "  build        - Build bundled hpm.hmlc"
-	@echo "  test         - Run all tests"
-	@echo "  install      - Install hpm to system (requires sudo)"
-	@echo "  install-dev  - Install hpm running from source"
-	@echo "  uninstall    - Remove hpm from system"
-	@echo "  clean        - Remove build artifacts"
-	@echo "  test-semver  - Run only semver tests"
-	@echo "  test-manifest - Run only manifest tests"
-	@echo "  test-lockfile - Run only lockfile tests"
-	@echo "  test-cache   - Run only cache tests"
-	@echo "  help         - Show this help"
+	@echo "  all            - Create hpm wrapper script (default)"
+	@echo "  build          - Build bundled hpm.hmlc (has bundler bug)"
+	@echo "  test           - Run all tests"
+	@echo "  install        - Install hpm to system"
+	@echo "  install-bundle - Install bundled version (has issues)"
+	@echo "  uninstall      - Remove hpm from system"
+	@echo "  clean          - Remove build artifacts"
+	@echo "  test-semver    - Run only semver tests"
+	@echo "  test-manifest  - Run only manifest tests"
+	@echo "  test-lockfile  - Run only lockfile tests"
+	@echo "  test-cache     - Run only cache tests"
+	@echo "  help           - Show this help"
 	@echo ""
 	@echo "Variables:"
 	@echo "  PREFIX       - Installation prefix (default: /usr/local)"
 	@echo "  HEMLOCK      - Hemlock interpreter (default: hemlock)"
 
-.PHONY: all build test install install-dev uninstall clean help test-semver test-manifest test-lockfile test-cache
+.PHONY: all hpm build test install install-bundle uninstall clean help test-semver test-manifest test-lockfile test-cache

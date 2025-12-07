@@ -2,7 +2,7 @@
 
 import { get, is_success } from "@stdlib/http";
 import { parse } from "@stdlib/json";
-import { getenv } from "@stdlib/env";
+import * as env from "@stdlib/env";
 import { exists, read_file } from "@stdlib/fs";
 import { sleep } from "@stdlib/time";
 
@@ -13,13 +13,13 @@ let INITIAL_BACKOFF_MS = 1000;  // 1 second
 // Get GitHub token from environment or config
 export fn get_token() {
     // First check environment variable
-    let token = getenv("GITHUB_TOKEN");
+    let token = env.getenv("GITHUB_TOKEN");
     if (token != null && token.length > 0) {
         return token;
     }
 
     // Then check config file
-    let home = getenv("HOME");
+    let home = env.getenv("HOME");
     if (home != null) {
         let config_path = home + "/.hpm/config.json";
         if (exists(config_path)) {

@@ -1,7 +1,7 @@
 // hpm - Hemlock Package Manager
 // Main entry point
 
-import { exit, getenv } from "@stdlib/env";
+import * as env from "@stdlib/env";
 import { exists, read_file, cwd } from "@stdlib/fs";
 import { parse } from "@stdlib/json";
 import { fork, exec, waitpid } from "@stdlib/process";
@@ -110,7 +110,7 @@ fn cmd_init() {
     // Check if package.json already exists
     if (exists(project_dir + "/package.json")) {
         print("package.json already exists");
-        exit(EXIT_SUCCESS);
+        env.exit(EXIT_SUCCESS);
     }
 
     // Get current directory name for default package name
@@ -118,7 +118,7 @@ fn cmd_init() {
     let dir_name = dir_parts[dir_parts.length - 1];
 
     // Get username from environment or use placeholder
-    let username = getenv("USER");
+    let username = env.getenv("USER");
     if (username == null || username.length == 0) {
         username = "your-username";
     }
@@ -164,7 +164,7 @@ fn cmd_install() {
     let pkg = manifest.read_manifest(project_dir);
     if (pkg == null) {
         print("No package.json found. Run 'hpm init' first.");
-        exit(EXIT_INVALID_MANIFEST);
+        env.exit(EXIT_INVALID_MANIFEST);
     }
 
     // Read existing lockfile
@@ -187,13 +187,13 @@ fn cmd_install() {
             let parts = manifest.split_name(pkg_name);
             if (parts == null) {
                 print("Invalid package name: " + pkg_name);
-                exit(EXIT_NOT_FOUND);
+                env.exit(EXIT_NOT_FOUND);
             }
 
             // Check if package exists on GitHub
             if (!github.repo_exists(parts.owner, parts.repo)) {
                 print("Package not found: " + pkg_name);
-                exit(EXIT_NOT_FOUND);
+                env.exit(EXIT_NOT_FOUND);
             }
 
             // If no version specified, get latest
@@ -228,7 +228,7 @@ fn cmd_install() {
         resolved = resolver.resolve(pkg, true);
     } catch (e) {
         print(e);
-        exit(EXIT_CONFLICT);
+        env.exit(EXIT_CONFLICT);
     }
 
     // Check for circular dependencies
@@ -237,7 +237,7 @@ fn cmd_install() {
         print("ERROR: Circular dependency detected");
         print("");
         print("  " + cycle.join(" -> "));
-        exit(EXIT_CIRCULAR_DEP);
+        env.exit(EXIT_CIRCULAR_DEP);
     }
 
     if (dry_run) {
@@ -251,7 +251,7 @@ fn cmd_install() {
             print("  " + pkg_name + "@" + res.version);
             i = i + 1;
         }
-        exit(EXIT_SUCCESS);
+        env.exit(EXIT_SUCCESS);
     }
 
     // Install packages
@@ -266,7 +266,7 @@ fn cmd_install() {
         resolved = installer.install_all(resolved, project_dir, lock, verbose, offline, parallel);
     } catch (e) {
         print("Installation failed: " + e);
-        exit(EXIT_NETWORK_ERROR);
+        env.exit(EXIT_NETWORK_ERROR);
     }
 
     // Update lockfile
@@ -337,14 +337,14 @@ fn cmd_uninstall() {
 
     if (pos_args.length == 0) {
         print("Usage: hpm uninstall <package>");
-        exit(EXIT_SUCCESS);
+        env.exit(EXIT_SUCCESS);
     }
 
     // Read manifest
     let pkg = manifest.read_manifest(project_dir);
     if (pkg == null) {
         print("No package.json found.");
-        exit(EXIT_INVALID_MANIFEST);
+        env.exit(EXIT_INVALID_MANIFEST);
     }
 
     // Read lockfile
@@ -415,7 +415,7 @@ fn cmd_update() {
     let pkg = manifest.read_manifest(project_dir);
     if (pkg == null) {
         print("No package.json found.");
-        exit(EXIT_INVALID_MANIFEST);
+        env.exit(EXIT_INVALID_MANIFEST);
     }
 
     // For now, just re-resolve and reinstall
@@ -431,7 +431,7 @@ fn cmd_update() {
         resolved = resolver.resolve(pkg, true);
     } catch (e) {
         print(e);
-        exit(EXIT_CONFLICT);
+        env.exit(EXIT_CONFLICT);
     }
 
     // Install packages
@@ -484,7 +484,7 @@ fn cmd_list() {
     let pkg = manifest.read_manifest(project_dir);
     if (pkg == null) {
         print("No package.json found.");
-        exit(EXIT_INVALID_MANIFEST);
+        env.exit(EXIT_INVALID_MANIFEST);
     }
 
     // Read lockfile
@@ -498,7 +498,7 @@ fn cmd_list() {
 
     if (installed.length == 0) {
         print("(no dependencies)");
-        exit(EXIT_SUCCESS);
+        env.exit(EXIT_SUCCESS);
     }
 
     // Build and print tree
@@ -586,13 +586,13 @@ fn cmd_outdated() {
     let pkg = manifest.read_manifest(project_dir);
     if (pkg == null) {
         print("No package.json found.");
-        exit(EXIT_INVALID_MANIFEST);
+        env.exit(EXIT_INVALID_MANIFEST);
     }
 
     let lock = lockfile.read_lockfile(project_dir);
     if (lock == null || lock.dependencies == null) {
         print("No packages installed.");
-        exit(EXIT_SUCCESS);
+        env.exit(EXIT_SUCCESS);
     }
 
     print("Package              Current   Wanted    Latest");
@@ -674,7 +674,7 @@ fn cmd_run() {
 
     if (pos_args.length == 0) {
         print("Usage: hpm run <script>");
-        exit(EXIT_SUCCESS);
+        env.exit(EXIT_SUCCESS);
     }
 
     let script_name = pos_args[0];
@@ -683,12 +683,12 @@ fn cmd_run() {
     let pkg = manifest.read_manifest(project_dir);
     if (pkg == null) {
         print("No package.json found.");
-        exit(EXIT_INVALID_MANIFEST);
+        env.exit(EXIT_INVALID_MANIFEST);
     }
 
     if (pkg.scripts == null || pkg.scripts[script_name] == null) {
         print("Script not found: " + script_name);
-        exit(EXIT_NOT_FOUND);
+        env.exit(EXIT_NOT_FOUND);
     }
 
     let script_cmd = pkg.scripts[script_name];
@@ -711,11 +711,11 @@ fn cmd_run() {
     if (pid == 0) {
         // Child process
         exec(cmd, cmd_args);
-        exit(1);  // exec failed
+        env.exit(1);  // exec failed
     } else {
         // Parent - wait for child
         let status = waitpid(pid);
-        exit(status);
+        env.exit(status);
     }
 }
 
@@ -732,12 +732,12 @@ fn cmd_run_with_script(script_name: string) {
     let pkg = manifest.read_manifest(project_dir);
     if (pkg == null) {
         print("No package.json found.");
-        exit(EXIT_INVALID_MANIFEST);
+        env.exit(EXIT_INVALID_MANIFEST);
     }
 
     if (pkg.scripts == null || pkg.scripts[script_name] == null) {
         print("Script not found: " + script_name);
-        exit(EXIT_NOT_FOUND);
+        env.exit(EXIT_NOT_FOUND);
     }
 
     let script_cmd = pkg.scripts[script_name];
@@ -757,10 +757,10 @@ fn cmd_run_with_script(script_name: string) {
     let pid = fork();
     if (pid == 0) {
         exec(cmd, cmd_args);
-        exit(1);
+        env.exit(1);
     } else {
         let status = waitpid(pid);
-        exit(status);
+        env.exit(status);
     }
 }
 
@@ -771,7 +771,7 @@ fn cmd_why() {
 
     if (pos_args.length == 0) {
         print("Usage: hpm why <package>");
-        exit(EXIT_SUCCESS);
+        env.exit(EXIT_SUCCESS);
     }
 
     let pkg_name = pos_args[0];
@@ -780,20 +780,20 @@ fn cmd_why() {
     let pkg = manifest.read_manifest(project_dir);
     if (pkg == null) {
         print("No package.json found.");
-        exit(EXIT_INVALID_MANIFEST);
+        env.exit(EXIT_INVALID_MANIFEST);
     }
 
     let lock = lockfile.read_lockfile(project_dir);
     if (lock == null) {
         print("No packages installed.");
-        exit(EXIT_SUCCESS);
+        env.exit(EXIT_SUCCESS);
     }
 
     // Check if package is installed
     let entry = lockfile.get_locked(lock, pkg_name);
     if (entry == null) {
         print("Package not installed: " + pkg_name);
-        exit(EXIT_NOT_FOUND);
+        env.exit(EXIT_NOT_FOUND);
     }
 
     print(pkg_name + "@" + entry.version);
@@ -833,7 +833,7 @@ fn cmd_cache() {
 
         if (packages.length == 0) {
             print("Cache is empty.");
-            exit(EXIT_SUCCESS);
+            env.exit(EXIT_SUCCESS);
         }
 
         print("Cached packages:");
@@ -876,18 +876,18 @@ fn main() {
     // Check for help or version flags
     if (has_flag("--help") || has_flag("-h")) {
         print_usage();
-        exit(EXIT_SUCCESS);
+        env.exit(EXIT_SUCCESS);
     }
 
     if (has_flag("--version") || has_flag("-v")) {
         print_version();
-        exit(EXIT_SUCCESS);
+        env.exit(EXIT_SUCCESS);
     }
 
     // Get command
     if (args.length < 2) {
         print_usage();
-        exit(EXIT_SUCCESS);
+        env.exit(EXIT_SUCCESS);
     }
 
     let command = args[1];
@@ -931,10 +931,10 @@ fn main() {
     } else {
         print("Unknown command: " + command);
         print("Run 'hpm --help' for usage.");
-        exit(1);
+        env.exit(1);
     }
 
-    exit(EXIT_SUCCESS);
+    env.exit(EXIT_SUCCESS);
 }
 
 // Run main
