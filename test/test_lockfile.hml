@@ -112,4 +112,123 @@ export fn run() {
         let manifest = { dependencies: deps, devDependencies: null };
         assert_false(lockfile.needs_update(lock, manifest), "no update needed");
     });
+
+    suite("lockfile.prune");
+
+    test("prune returns empty when lockfile is null", fn() {
+        let result = lockfile.prune(null, { dependencies: {} });
+        assert_eq(result.removed.length, 0, "no removed");
+    });
+
+    test("prune keeps direct dependencies", fn() {
+        let lock = lockfile.create_empty();
+        lock = lockfile.set_locked(lock, "owner/a", lockfile.create_entry("1.0.0", "", "", null));
+        lock = lockfile.set_locked(lock, "owner/b", lockfile.create_entry("2.0.0", "", "", null));
+
+        let deps = {};
+        deps["owner/a"] = "^1.0.0";
+        deps["owner/b"] = "^2.0.0";
+        let manifest = { dependencies: deps, devDependencies: null };
+
+        let result = lockfile.prune(lock, manifest);
+        assert_eq(result.removed.length, 0, "nothing removed");
+        assert_not_null(lockfile.get_locked(result.lockfile, "owner/a"), "a still exists");
+        assert_not_null(lockfile.get_locked(result.lockfile, "owner/b"), "b still exists");
+    });
+
+    test("prune removes orphaned packages", fn() {
+        let lock = lockfile.create_empty();
+        lock = lockfile.set_locked(lock, "owner/a", lockfile.create_entry("1.0.0", "", "", null));
+        lock = lockfile.set_locked(lock, "owner/orphan", lockfile.create_entry("1.0.0", "", "", null));
+
+        let deps = {};
+        deps["owner/a"] = "^1.0.0";
+        // owner/orphan is not in manifest
+        let manifest = { dependencies: deps, devDependencies: null };
+
+        let result = lockfile.prune(lock, manifest);
+        assert_eq(result.removed.length, 1, "one removed");
+        assert_eq(result.removed[0], "owner/orphan", "orphan was removed");
+        assert_not_null(lockfile.get_locked(result.lockfile, "owner/a"), "a still exists");
+        assert_null(lockfile.get_locked(result.lockfile, "owner/orphan"), "orphan removed");
+    });
+
+    test("prune keeps transitive dependencies", fn() {
+        // owner/a depends on owner/trans
+        let a_deps = {};
+        a_deps["owner/trans"] = "^1.0.0";
+        let lock = lockfile.create_empty();
+        lock = lockfile.set_locked(lock, "owner/a", lockfile.create_entry("1.0.0", "", "", a_deps));
+        lock = lockfile.set_locked(lock, "owner/trans", lockfile.create_entry("1.0.0", "", "", null));
+
+        let deps = {};
+        deps["owner/a"] = "^1.0.0";
+        // owner/trans is not direct but is transitive
+        let manifest = { dependencies: deps, devDependencies: null };
+
+        let result = lockfile.prune(lock, manifest);
+        assert_eq(result.removed.length, 0, "nothing removed");
+        assert_not_null(lockfile.get_locked(result.lockfile, "owner/a"), "a still exists");
+        assert_not_null(lockfile.get_locked(result.lockfile, "owner/trans"), "trans still exists");
+    });
+
+    test("prune removes orphaned transitive deps", fn() {
+        // owner/removed used to depend on owner/trans
+        let lock = lockfile.create_empty();
+        lock = lockfile.set_locked(lock, "owner/a", lockfile.create_entry("1.0.0", "", "", null));
+        lock = lockfile.set_locked(lock, "owner/trans", lockfile.create_entry("1.0.0", "", "", null));
+
+        let deps = {};
+        deps["owner/a"] = "^1.0.0";
+        // owner/trans was transitive of something removed
+        let manifest = { dependencies: deps, devDependencies: null };
+
+        let result = lockfile.prune(lock, manifest);
+        assert_eq(result.removed.length, 1, "one removed");
+        assert_eq(result.removed[0], "owner/trans", "trans was removed");
+    });
+
+    test("prune handles devDependencies", fn() {
+        let lock = lockfile.create_empty();
+        lock = lockfile.set_locked(lock, "owner/prod", lockfile.create_entry("1.0.0", "", "", null));
+        lock = lockfile.set_locked(lock, "owner/dev", lockfile.create_entry("1.0.0", "", "", null));
+
+        let deps = {};
+        deps["owner/prod"] = "^1.0.0";
+        let devDeps = {};
+        devDeps["owner/dev"] = "^1.0.0";
+        let manifest = { dependencies: deps, devDependencies: devDeps };
+
+        let result = lockfile.prune(lock, manifest);
+        assert_eq(result.removed.length, 0, "nothing removed");
+        assert_not_null(lockfile.get_locked(result.lockfile, "owner/prod"), "prod still exists");
+        assert_not_null(lockfile.get_locked(result.lockfile, "owner/dev"), "dev still exists");
+    });
+
+    test("prune handles deep transitive chain", fn() {
+        // a -> b -> c -> d
+        let b_deps = {};
+        b_deps["owner/c"] = "^1.0.0";
+        let c_deps = {};
+        c_deps["owner/d"] = "^1.0.0";
+        let a_deps = {};
+        a_deps["owner/b"] = "^1.0.0";
+
+        let lock = lockfile.create_empty();
+        lock = lockfile.set_locked(lock, "owner/a", lockfile.create_entry("1.0.0", "", "", a_deps));
+        lock = lockfile.set_locked(lock, "owner/b", lockfile.create_entry("1.0.0", "", "", b_deps));
+        lock = lockfile.set_locked(lock, "owner/c", lockfile.create_entry("1.0.0", "", "", c_deps));
+        lock = lockfile.set_locked(lock, "owner/d", lockfile.create_entry("1.0.0", "", "", null));
+
+        let deps = {};
+        deps["owner/a"] = "^1.0.0";
+        let manifest = { dependencies: deps, devDependencies: null };
+
+        let result = lockfile.prune(lock, manifest);
+        assert_eq(result.removed.length, 0, "nothing removed");
+        assert_not_null(lockfile.get_locked(result.lockfile, "owner/a"), "a exists");
+        assert_not_null(lockfile.get_locked(result.lockfile, "owner/b"), "b exists");
+        assert_not_null(lockfile.get_locked(result.lockfile, "owner/c"), "c exists");
+        assert_not_null(lockfile.get_locked(result.lockfile, "owner/d"), "d exists");
+    });
 }
