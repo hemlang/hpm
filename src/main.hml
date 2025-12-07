@@ -15,7 +15,7 @@ import * as installer from "./installer.hml";
 import * as cache from "./cache.hml";
 
 // Version info
-let HPM_VERSION = "1.0.1";
+let HPM_VERSION = "1.0.2";
 
 // Exit codes
 let EXIT_SUCCESS = 0;
@@ -56,7 +56,7 @@ fn print_usage() {
     print("  --verbose         Show detailed output");
     print("  --dry-run         Show what would be installed");
     print("  --offline         Install from cache only (no network)");
-    print("  --no-parallel     Disable parallel downloads");
+    print("  --parallel        Enable parallel downloads (experimental)");
     print("  --yes, -y         Accept all defaults");
     print("");
     print("Examples:");
@@ -156,7 +156,7 @@ fn cmd_install() {
     let verbose = has_flag("--verbose");
     let dry_run = has_flag("--dry-run");
     let offline = has_flag("--offline");
-    let parallel = !has_flag("--no-parallel");  // Parallel by default
+    let parallel = has_flag("--parallel");  // Sequential by default (parallel has issues with HTTP lib)
     let is_dev = has_flag("--dev") || has_flag("-D");
     let pos_args = get_positional_args();
 
@@ -408,7 +408,7 @@ fn cmd_update() {
     let project_dir = get_project_dir();
     let verbose = has_flag("--verbose");
     let offline = has_flag("--offline");
-    let parallel = !has_flag("--no-parallel");
+    let parallel = has_flag("--parallel");
     let pos_args = get_positional_args();
 
     // Read manifest

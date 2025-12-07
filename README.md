@@ -4,18 +4,37 @@ A package manager for the [Hemlock](https://github.com/hemlang/hemlock) programm
 
 ## Installation
 
-hpm requires Hemlock to be installed. Once Hemlock is installed, you can run hpm directly:
+hpm requires [Hemlock](https://github.com/hemlang/hemlock) to be installed first.
 
 ```bash
 # Clone the repository
 git clone https://github.com/hemlang/hpm.git
 cd hpm
 
-# Run hpm
-./hpm --help
+# Install to /usr/local/bin (requires sudo on most systems)
+sudo make install
+
+# Or install to a custom location
+make install PREFIX=$HOME/.local
 ```
 
-Or add the hpm directory to your PATH.
+After installation, you can run `hpm` from anywhere:
+
+```bash
+hpm --help
+```
+
+### Manual Installation
+
+If you prefer not to use `make install`, you can run hpm directly:
+
+```bash
+# Run from the hpm directory
+./hpm --help
+
+# Or run via hemlock
+hemlock /path/to/hpm/src/main.hml --help
+```
 
 ## Quick Start
 
