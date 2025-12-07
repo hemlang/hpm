@@ -1,0 +1,20 @@
+{
+  "name": "hemlang/hpm",
+  "version": "1.0.0",
+  "description": "Hemlock Package Manager - A package manager for the Hemlock programming language",
+  "author": "Hemlock Team",
+  "license": "MIT",
+  "repository": "https://github.com/hemlang/hpm",
+  "main": "src/main.hml",
+  "dependencies": {},
+  "devDependencies": {},
+  "scripts": {
+    "test": "hemlock test/run.hml",
+    "build": "hemlock --bundle src/main.hml -o hpm.hmlc"
+  },
+  "files": [
+    "src/",
+    "LICENSE",
+    "README.md"
+  ]
+}

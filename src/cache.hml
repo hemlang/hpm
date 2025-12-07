@@ -1,0 +1,256 @@
+// hpm - Global cache management
+
+import { exists, read_file, write_file, make_dir, list_dir, remove_file, remove_dir, is_dir } from "@stdlib/fs";
+import { getenv } from "@stdlib/env";
+import { parse, stringify, pretty } from "@stdlib/json";
+
+// Get cache directory path
+export fn get_cache_dir(): string {
+    // Check environment variable first
+    let cache_dir = getenv("HPM_CACHE_DIR");
+    if (cache_dir != null && cache_dir.length > 0) {
+        return cache_dir;
+    }
+
+    // Default to ~/.hpm/cache
+    let home = getenv("HOME");
+    if (home == null) {
+        home = ".";
+    }
+
+    return home + "/.hpm/cache";
+}
+
+// Get config directory path
+export fn get_config_dir(): string {
+    let home = getenv("HOME");
+    if (home == null) {
+        home = ".";
+    }
+    return home + "/.hpm";
+}
+
+// Ensure cache directory exists
+export fn ensure_cache_dir() {
+    let cache_dir = get_cache_dir();
+    ensure_dir(cache_dir);
+    return cache_dir;
+}
+
+// Ensure a directory exists (creates recursively if needed)
+fn ensure_dir(path: string) {
+    if (exists(path)) {
+        return;
+    }
+
+    // Create parent directories if needed
+    let parts = path.split("/");
+    let current = "";
+
+    let i = 0;
+    while (i < parts.length) {
+        let part = parts[i];
+        if (part.length > 0) {
+            if (current.length == 0 && path[0] == '/') {
+                current = "/" + part;
+            } else if (current.length == 0) {
+                current = part;
+            } else {
+                current = current + "/" + part;
+            }
+
+            if (!exists(current)) {
+                make_dir(current);
+            }
+        }
+        i = i + 1;
+    }
+}
+
+// Get path to cached tarball
+export fn get_cached_tarball_path(owner: string, repo: string, version: string): string {
+    let cache_dir = get_cache_dir();
+
+    // Remove 'v' prefix if present
+    let v = version;
+    if (v.length > 0 && v[0] == 'v') {
+        v = v.substr(1, v.length - 1);
+    }
+
+    return cache_dir + "/" + owner + "/" + repo + "/" + v + ".tar.gz";
+}
+
+// Check if tarball is cached
+export fn is_cached(owner: string, repo: string, version: string): bool {
+    let path = get_cached_tarball_path(owner, repo, version);
+    return exists(path);
+}
+
+// Store tarball in cache
+export fn store_tarball(owner: string, repo: string, version: string, data) {
+    let cache_dir = get_cache_dir();
+
+    // Remove 'v' prefix if present
+    let v = version;
+    if (v.length > 0 && v[0] == 'v') {
+        v = v.substr(1, v.length - 1);
+    }
+
+    // Ensure directory structure
+    ensure_dir(cache_dir + "/" + owner);
+    ensure_dir(cache_dir + "/" + owner + "/" + repo);
+
+    // Write tarball
+    let path = cache_dir + "/" + owner + "/" + repo + "/" + v + ".tar.gz";
+
+    // Data might be string or buffer, handle both
+    let f = open(path, "w");
+    if (typeof(data) == "buffer") {
+        f.write_bytes(data);
+    } else {
+        f.write(data);
+    }
+    f.close();
+
+    return path;
+}
+
+// Read tarball from cache
+export fn read_tarball(owner: string, repo: string, version: string) {
+    let path = get_cached_tarball_path(owner, repo, version);
+
+    if (!exists(path)) {
+        return null;
+    }
+
+    let f = open(path, "r");
+    let content = f.read();
+    f.close();
+
+    return content;
+}
+
+// List all cached packages
+export fn list_cached() {
+    let cache_dir = get_cache_dir();
+    let packages = [];
+
+    if (!exists(cache_dir)) {
+        return packages;
+    }
+
+    // List owners
+    let owners = list_dir(cache_dir);
+    let i = 0;
+    while (i < owners.length) {
+        let owner = owners[i];
+        let owner_path = cache_dir + "/" + owner;
+
+        if (is_dir(owner_path)) {
+            // List repos
+            let repos = list_dir(owner_path);
+            let j = 0;
+            while (j < repos.length) {
+                let repo = repos[j];
+                let repo_path = owner_path + "/" + repo;
+
+                if (is_dir(repo_path)) {
+                    // List versions
+                    let files = list_dir(repo_path);
+                    let k = 0;
+                    while (k < files.length) {
+                        let file = files[k];
+                        if (file.ends_with(".tar.gz")) {
+                            let version = file.substr(0, file.length - 7);  // Remove .tar.gz
+                            packages.push({
+                                name: owner + "/" + repo,
+                                version: version,
+                                path: repo_path + "/" + file
+                            });
+                        }
+                        k = k + 1;
+                    }
+                }
+                j = j + 1;
+            }
+        }
+        i = i + 1;
+    }
+
+    return packages;
+}
+
+// Clear all cached packages
+export fn clear_cache() {
+    let cache_dir = get_cache_dir();
+
+    if (!exists(cache_dir)) {
+        return 0;
+    }
+
+    let count = 0;
+    let packages = list_cached();
+
+    let i = 0;
+    while (i < packages.length) {
+        let pkg = packages[i];
+        try {
+            remove_file(pkg.path);
+            count = count + 1;
+        } catch (e) {
+            // Ignore errors
+        }
+        i = i + 1;
+    }
+
+    return count;
+}
+
+// Get cache size in bytes
+export fn get_cache_size(): i64 {
+    let packages = list_cached();
+    let total: i64 = 0;
+
+    let i = 0;
+    while (i < packages.length) {
+        let pkg = packages[i];
+        try {
+            let content = read_file(pkg.path);
+            if (content != null) {
+                total = total + content.length;
+            }
+        } catch (e) {
+            // Ignore errors
+        }
+        i = i + 1;
+    }
+
+    return total;
+}
+
+// Read hpm config
+export fn read_config() {
+    let config_dir = get_config_dir();
+    let config_path = config_dir + "/config.json";
+
+    if (!exists(config_path)) {
+        return {};
+    }
+
+    try {
+        let content = read_file(config_path);
+        return parse(content);
+    } catch (e) {
+        return {};
+    }
+}
+
+// Write hpm config
+export fn write_config(config) {
+    let config_dir = get_config_dir();
+    ensure_dir(config_dir);
+
+    let config_path = config_dir + "/config.json";
+    let content = pretty(config, 2);
+    write_file(config_path, content + "\n");
+}

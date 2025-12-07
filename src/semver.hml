@@ -1,0 +1,411 @@
+// hpm - Semantic Versioning module
+// Implements semver 2.0.0 parsing and comparison
+
+import { HashMap } from "@stdlib/collections";
+
+// Parse a version string like "1.2.3" or "1.2.3-alpha.1" into components
+export fn parse(version_str: string) {
+    if (version_str == null || version_str.length == 0) {
+        return null;
+    }
+
+    // Remove leading 'v' if present
+    let v = version_str;
+    if (v[0] == 'v' || v[0] == 'V') {
+        v = v.substr(1, v.length - 1);
+    }
+
+    // Split into main version and prerelease
+    let prerelease = "";
+    let build = "";
+
+    // Check for build metadata (+)
+    let plus_pos = v.find("+");
+    if (plus_pos >= 0) {
+        build = v.substr(plus_pos + 1, v.length - plus_pos - 1);
+        v = v.substr(0, plus_pos);
+    }
+
+    // Check for prerelease (-)
+    let dash_pos = v.find("-");
+    if (dash_pos >= 0) {
+        prerelease = v.substr(dash_pos + 1, v.length - dash_pos - 1);
+        v = v.substr(0, dash_pos);
+    }
+
+    // Parse major.minor.patch
+    let parts = v.split(".");
+    if (parts.length < 1) {
+        return null;
+    }
+
+    let major = parse_int(parts[0]);
+    let minor = 0;
+    let patch = 0;
+
+    if (parts.length >= 2) {
+        minor = parse_int(parts[1]);
+    }
+    if (parts.length >= 3) {
+        patch = parse_int(parts[2]);
+    }
+
+    return {
+        major: major,
+        minor: minor,
+        patch: patch,
+        prerelease: prerelease,
+        build: build,
+        raw: version_str
+    };
+}
+
+// Convert parsed version back to string
+export fn stringify(ver): string {
+    let s = "" + ver.major + "." + ver.minor + "." + ver.patch;
+    if (ver.prerelease != null && ver.prerelease.length > 0) {
+        s = s + "-" + ver.prerelease;
+    }
+    if (ver.build != null && ver.build.length > 0) {
+        s = s + "+" + ver.build;
+    }
+    return s;
+}
+
+// Helper: Parse string to integer
+fn parse_int(s: string): i32 {
+    let result = 0;
+    let i = 0;
+    let negative = false;
+
+    if (s.length > 0 && s[0] == '-') {
+        negative = true;
+        i = 1;
+    }
+
+    while (i < s.length) {
+        let ch = s[i];
+        if (ch >= '0' && ch <= '9') {
+            let digit: i32 = ch;
+            digit = digit - 48;  // '0' is ASCII 48
+            result = result * 10 + digit;
+        } else {
+            break;
+        }
+        i = i + 1;
+    }
+
+    if (negative) {
+        result = -result;
+    }
+    return result;
+}
+
+// Compare two version objects
+// Returns: -1 if a < b, 0 if a == b, 1 if a > b
+export fn compare(a, b): i32 {
+    // Compare major
+    if (a.major < b.major) { return -1; }
+    if (a.major > b.major) { return 1; }
+
+    // Compare minor
+    if (a.minor < b.minor) { return -1; }
+    if (a.minor > b.minor) { return 1; }
+
+    // Compare patch
+    if (a.patch < b.patch) { return -1; }
+    if (a.patch > b.patch) { return 1; }
+
+    // Compare prerelease (empty prerelease > non-empty prerelease)
+    let a_has_pre = a.prerelease != null && a.prerelease.length > 0;
+    let b_has_pre = b.prerelease != null && b.prerelease.length > 0;
+
+    if (!a_has_pre && b_has_pre) { return 1; }
+    if (a_has_pre && !b_has_pre) { return -1; }
+    if (a_has_pre && b_has_pre) {
+        // Compare prerelease strings lexicographically
+        if (a.prerelease < b.prerelease) { return -1; }
+        if (a.prerelease > b.prerelease) { return 1; }
+    }
+
+    return 0;
+}
+
+// Check if version a is greater than version b
+export fn gt(a, b): bool {
+    return compare(a, b) > 0;
+}
+
+// Check if version a is greater than or equal to version b
+export fn gte(a, b): bool {
+    return compare(a, b) >= 0;
+}
+
+// Check if version a is less than version b
+export fn lt(a, b): bool {
+    return compare(a, b) < 0;
+}
+
+// Check if version a is less than or equal to version b
+export fn lte(a, b): bool {
+    return compare(a, b) <= 0;
+}
+
+// Check if version a equals version b
+export fn eq(a, b): bool {
+    return compare(a, b) == 0;
+}
+
+// Parse a version constraint like "^1.2.3", "~1.2.3", ">=1.0.0", etc.
+export fn parse_constraint(constraint_str: string) {
+    let s = constraint_str.trim();
+
+    if (s.length == 0 || s == "*") {
+        return { type: "any" };
+    }
+
+    // Check for caret range (^)
+    if (s[0] == '^') {
+        let ver = parse(s.substr(1, s.length - 1));
+        return { type: "caret", version: ver };
+    }
+
+    // Check for tilde range (~)
+    if (s[0] == '~') {
+        let ver = parse(s.substr(1, s.length - 1));
+        return { type: "tilde", version: ver };
+    }
+
+    // Check for >=
+    if (s.length >= 2 && s[0] == '>' && s[1] == '=') {
+        let ver = parse(s.substr(2, s.length - 2).trim());
+        return { type: "gte", version: ver };
+    }
+
+    // Check for <=
+    if (s.length >= 2 && s[0] == '<' && s[1] == '=') {
+        let ver = parse(s.substr(2, s.length - 2).trim());
+        return { type: "lte", version: ver };
+    }
+
+    // Check for >
+    if (s[0] == '>') {
+        let ver = parse(s.substr(1, s.length - 1).trim());
+        return { type: "gt", version: ver };
+    }
+
+    // Check for <
+    if (s[0] == '<') {
+        let ver = parse(s.substr(1, s.length - 1).trim());
+        return { type: "lt", version: ver };
+    }
+
+    // Check for range (contains space)
+    if (s.find(" ") >= 0) {
+        let parts = s.split(" ");
+        let constraints = [];
+        let i = 0;
+        while (i < parts.length) {
+            let p = parts[i].trim();
+            if (p.length > 0) {
+                constraints.push(parse_constraint(p));
+            }
+            i = i + 1;
+        }
+        return { type: "range", constraints: constraints };
+    }
+
+    // Exact version
+    let ver = parse(s);
+    return { type: "exact", version: ver };
+}
+
+// Check if a version satisfies a constraint
+export fn satisfies(version, constraint): bool {
+    if (constraint.type == "any") {
+        return true;
+    }
+
+    if (constraint.type == "exact") {
+        return eq(version, constraint.version);
+    }
+
+    if (constraint.type == "gt") {
+        return gt(version, constraint.version);
+    }
+
+    if (constraint.type == "gte") {
+        return gte(version, constraint.version);
+    }
+
+    if (constraint.type == "lt") {
+        return lt(version, constraint.version);
+    }
+
+    if (constraint.type == "lte") {
+        return lte(version, constraint.version);
+    }
+
+    if (constraint.type == "caret") {
+        // ^1.2.3 means >=1.2.3 and <2.0.0 (for major > 0)
+        // ^0.2.3 means >=0.2.3 and <0.3.0 (for major == 0)
+        // ^0.0.3 means >=0.0.3 and <0.0.4 (for major == 0, minor == 0)
+        let c = constraint.version;
+
+        if (!gte(version, c)) {
+            return false;
+        }
+
+        if (c.major > 0) {
+            // Major must match, no higher major
+            if (version.major >= c.major + 1) {
+                return false;
+            }
+        } else if (c.minor > 0) {
+            // Major must be 0, minor must match
+            if (version.major > 0) {
+                return false;
+            }
+            if (version.minor >= c.minor + 1) {
+                return false;
+            }
+        } else {
+            // Major and minor are 0, patch must match exactly
+            if (version.major > 0 || version.minor > 0) {
+                return false;
+            }
+            if (version.patch != c.patch) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    if (constraint.type == "tilde") {
+        // ~1.2.3 means >=1.2.3 and <1.3.0
+        let c = constraint.version;
+
+        if (!gte(version, c)) {
+            return false;
+        }
+
+        // Major and minor must match
+        if (version.major != c.major) {
+            return false;
+        }
+        if (version.minor >= c.minor + 1) {
+            return false;
+        }
+
+        return true;
+    }
+
+    if (constraint.type == "range") {
+        // All constraints must be satisfied
+        let i = 0;
+        while (i < constraint.constraints.length) {
+            if (!satisfies(version, constraint.constraints[i])) {
+                return false;
+            }
+            i = i + 1;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+// Find the highest version from a list that satisfies a constraint
+export fn max_satisfying(versions: array, constraint): string {
+    let best = null;
+    let best_ver = null;
+
+    let i = 0;
+    while (i < versions.length) {
+        let v = versions[i];
+        let parsed = null;
+
+        if (typeof(v) == "string") {
+            parsed = parse(v);
+        } else {
+            parsed = v;
+        }
+
+        if (parsed != null && satisfies(parsed, constraint)) {
+            if (best_ver == null || gt(parsed, best_ver)) {
+                best = v;
+                best_ver = parsed;
+            }
+        }
+
+        i = i + 1;
+    }
+
+    if (best == null) {
+        return null;
+    }
+
+    if (typeof(best) == "string") {
+        return best;
+    }
+    return stringify(best);
+}
+
+// Sort versions in ascending order
+export fn sort(versions: array): array {
+    // Simple bubble sort for now
+    let result = [];
+    let i = 0;
+    while (i < versions.length) {
+        result.push(versions[i]);
+        i = i + 1;
+    }
+
+    let n = result.length;
+    i = 0;
+    while (i < n - 1) {
+        let j = 0;
+        while (j < n - i - 1) {
+            let a = result[j];
+            let b = result[j + 1];
+
+            let a_parsed = a;
+            let b_parsed = b;
+
+            if (typeof(a) == "string") {
+                a_parsed = parse(a);
+            }
+            if (typeof(b) == "string") {
+                b_parsed = parse(b);
+            }
+
+            if (gt(a_parsed, b_parsed)) {
+                result[j] = b;
+                result[j + 1] = a;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    return result;
+}
+
+// Check if two constraints have any overlap
+export fn constraints_overlap(c1, c2): bool {
+    // This is a simplified check - would need more sophisticated analysis
+    // for complete accuracy, but works for common cases
+
+    if (c1.type == "any" || c2.type == "any") {
+        return true;
+    }
+
+    if (c1.type == "exact" && c2.type == "exact") {
+        return eq(c1.version, c2.version);
+    }
+
+    // For other cases, we'd need to compute the intersection
+    // For now, assume they might overlap
+    return true;
+}

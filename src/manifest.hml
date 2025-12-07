@@ -1,0 +1,218 @@
+// hpm - Package manifest (package.json) handling
+
+import { parse, stringify, pretty, get } from "@stdlib/json";
+import { exists, read_file, write_file } from "@stdlib/fs";
+
+// Default package.json template
+export fn create_default(name: string, version: string) {
+    return {
+        name: name,
+        version: version,
+        description: "",
+        author: "",
+        license: "MIT",
+        main: "src/index.hml",
+        dependencies: {},
+        devDependencies: {}
+    };
+}
+
+// Read and parse package.json from a directory
+export fn read_manifest(dir: string) {
+    let path = dir + "/package.json";
+
+    if (!exists(path)) {
+        return null;
+    }
+
+    let content = read_file(path);
+    if (content == null || content.length == 0) {
+        return null;
+    }
+
+    try {
+        return parse(content);
+    } catch (e) {
+        throw "Failed to parse package.json: " + e;
+    }
+}
+
+// Write package.json to a directory
+export fn write_manifest(dir: string, manifest) {
+    let path = dir + "/package.json";
+    let content = pretty(manifest, 2);
+    write_file(path, content + "\n");
+    return null;
+}
+
+// Validate a package.json manifest
+export fn validate(manifest) {
+    let errors = [];
+
+    // Required fields
+    if (manifest.name == null || manifest.name == "") {
+        errors.push("Missing required field: name");
+    } else {
+        // Validate name format (owner/repo)
+        let name = manifest.name;
+        let slash_pos = name.find("/");
+        if (slash_pos < 1 || slash_pos >= name.length - 1) {
+            errors.push("Invalid name format: must be 'owner/repo'");
+        }
+
+        // Check for reserved names
+        if (name.starts_with("stdlib/") || name.starts_with("hpm/")) {
+            errors.push("Reserved package name prefix: " + name.split("/")[0]);
+        }
+    }
+
+    if (manifest.version == null || manifest.version == "") {
+        errors.push("Missing required field: version");
+    }
+
+    // Validate dependencies if present
+    if (manifest.dependencies != null) {
+        let dep_keys = manifest.dependencies.keys();
+        let i = 0;
+        while (i < dep_keys.length) {
+            let dep = dep_keys[i];
+            let slash_pos = dep.find("/");
+            if (slash_pos < 1 || slash_pos >= dep.length - 1) {
+                errors.push("Invalid dependency name: " + dep + " (must be 'owner/repo')");
+            }
+            i = i + 1;
+        }
+    }
+
+    // Validate devDependencies if present
+    if (manifest.devDependencies != null) {
+        let dep_keys = manifest.devDependencies.keys();
+        let i = 0;
+        while (i < dep_keys.length) {
+            let dep = dep_keys[i];
+            let slash_pos = dep.find("/");
+            if (slash_pos < 1 || slash_pos >= dep.length - 1) {
+                errors.push("Invalid devDependency name: " + dep + " (must be 'owner/repo')");
+            }
+            i = i + 1;
+        }
+    }
+
+    return {
+        valid: errors.length == 0,
+        errors: errors
+    };
+}
+
+// Get all dependencies (both regular and dev)
+export fn get_all_dependencies(manifest, include_dev: bool) {
+    let deps = {};
+
+    if (manifest.dependencies != null) {
+        let keys = manifest.dependencies.keys();
+        let i = 0;
+        while (i < keys.length) {
+            let key = keys[i];
+            deps[key] = manifest.dependencies[key];
+            i = i + 1;
+        }
+    }
+
+    if (include_dev && manifest.devDependencies != null) {
+        let keys = manifest.devDependencies.keys();
+        let i = 0;
+        while (i < keys.length) {
+            let key = keys[i];
+            deps[key] = manifest.devDependencies[key];
+            i = i + 1;
+        }
+    }
+
+    return deps;
+}
+
+// Add a dependency to manifest
+export fn add_dependency(manifest, name: string, version: string, is_dev: bool) {
+    if (is_dev) {
+        if (manifest.devDependencies == null) {
+            manifest.devDependencies = {};
+        }
+        manifest.devDependencies[name] = version;
+    } else {
+        if (manifest.dependencies == null) {
+            manifest.dependencies = {};
+        }
+        manifest.dependencies[name] = version;
+    }
+    return manifest;
+}
+
+// Remove a dependency from manifest
+export fn remove_dependency(manifest, name: string) {
+    if (manifest.dependencies != null && manifest.dependencies[name] != null) {
+        // Note: Hemlock doesn't have proper delete, so we rebuild the object
+        let new_deps = {};
+        let keys = manifest.dependencies.keys();
+        let i = 0;
+        while (i < keys.length) {
+            let key = keys[i];
+            if (key != name) {
+                new_deps[key] = manifest.dependencies[key];
+            }
+            i = i + 1;
+        }
+        manifest.dependencies = new_deps;
+    }
+
+    if (manifest.devDependencies != null && manifest.devDependencies[name] != null) {
+        let new_deps = {};
+        let keys = manifest.devDependencies.keys();
+        let i = 0;
+        while (i < keys.length) {
+            let key = keys[i];
+            if (key != name) {
+                new_deps[key] = manifest.devDependencies[key];
+            }
+            i = i + 1;
+        }
+        manifest.devDependencies = new_deps;
+    }
+
+    return manifest;
+}
+
+// Parse package specifier like "owner/repo@^1.0.0"
+export fn parse_specifier(spec: string) {
+    let at_pos = spec.find("@");
+
+    if (at_pos < 0) {
+        // No version specified
+        return {
+            name: spec,
+            version: "*"
+        };
+    }
+
+    // Check if @ is part of a scoped package or a version separator
+    // For GitHub-style names (owner/repo), @ is always version separator
+    let name = spec.substr(0, at_pos);
+    let version = spec.substr(at_pos + 1, spec.length - at_pos - 1);
+
+    return {
+        name: name,
+        version: version
+    };
+}
+
+// Split package name into owner and repo
+export fn split_name(name: string) {
+    let slash_pos = name.find("/");
+    if (slash_pos < 0) {
+        return null;
+    }
+
+    return {
+        owner: name.substr(0, slash_pos),
+        repo: name.substr(slash_pos + 1, name.length - slash_pos - 1)
+    };
+}

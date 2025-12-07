@@ -1,0 +1,903 @@
+// hpm - Hemlock Package Manager
+// Main entry point
+
+import { exit, getenv } from "@stdlib/env";
+import { exists, read_file, cwd } from "@stdlib/fs";
+import { parse } from "@stdlib/json";
+import { fork, exec, waitpid } from "@stdlib/process";
+
+import * as manifest from "./manifest.hml";
+import * as lockfile from "./lockfile.hml";
+import * as semver from "./semver.hml";
+import * as github from "./github.hml";
+import * as resolver from "./resolver.hml";
+import * as installer from "./installer.hml";
+import * as cache from "./cache.hml";
+
+// Version info
+let HPM_VERSION = "1.0.0";
+
+// Exit codes
+let EXIT_SUCCESS = 0;
+let EXIT_CONFLICT = 1;
+let EXIT_NOT_FOUND = 2;
+let EXIT_VERSION_NOT_FOUND = 3;
+let EXIT_NETWORK_ERROR = 4;
+let EXIT_INVALID_MANIFEST = 5;
+let EXIT_INTEGRITY_ERROR = 6;
+let EXIT_RATE_LIMIT = 7;
+let EXIT_CIRCULAR_DEP = 8;
+
+// ============================================================================
+// CLI Helpers
+// ============================================================================
+
+fn print_usage() {
+    print("hpm - Hemlock Package Manager v" + HPM_VERSION);
+    print("");
+    print("Usage: hpm <command> [options]");
+    print("");
+    print("Commands:");
+    print("  init              Create a new package.json");
+    print("  install [pkg]     Install dependencies or a specific package");
+    print("  uninstall <pkg>   Remove a package");
+    print("  update [pkg]      Update dependencies");
+    print("  list              List installed packages");
+    print("  outdated          Show outdated packages");
+    print("  run <script>      Run a script from package.json");
+    print("  test              Run the test script");
+    print("  why <pkg>         Explain why a package is installed");
+    print("  cache             Manage the global cache");
+    print("");
+    print("Options:");
+    print("  --help, -h        Show this help message");
+    print("  --version, -v     Show version number");
+    print("  --dev, -D         Install as dev dependency");
+    print("  --verbose         Show detailed output");
+    print("  --dry-run         Show what would be installed");
+    print("  --yes, -y         Accept all defaults");
+    print("");
+    print("Examples:");
+    print("  hpm init");
+    print("  hpm install hemlang/sprout@^1.0.0");
+    print("  hpm install --dev hemlang/test-utils");
+    print("  hpm run test");
+}
+
+fn print_version() {
+    print("hpm v" + HPM_VERSION);
+}
+
+fn get_project_dir(): string {
+    return cwd();
+}
+
+fn has_flag(flag: string): bool {
+    let i = 1;
+    while (i < args.length) {
+        if (args[i] == flag) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn get_positional_args(): array {
+    let result = [];
+    let i = 2;  // Skip script name and command
+    while (i < args.length) {
+        let arg = args[i];
+        if (arg[0] != '-') {
+            result.push(arg);
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+// ============================================================================
+// Commands
+// ============================================================================
+
+// hpm init
+fn cmd_init() {
+    let project_dir = get_project_dir();
+    let use_defaults = has_flag("--yes") || has_flag("-y");
+
+    // Check if package.json already exists
+    if (exists(project_dir + "/package.json")) {
+        print("package.json already exists");
+        exit(EXIT_SUCCESS);
+    }
+
+    // Get current directory name for default package name
+    let dir_parts = project_dir.split("/");
+    let dir_name = dir_parts[dir_parts.length - 1];
+
+    // Get username from environment or use placeholder
+    let username = getenv("USER");
+    if (username == null || username.length == 0) {
+        username = "your-username";
+    }
+
+    let pkg_name = username + "/" + dir_name;
+    let pkg_version = "0.1.0";
+    let pkg_description = "";
+    let pkg_author = "";
+    let pkg_license = "MIT";
+
+    if (use_defaults) {
+        // Use all defaults
+        print("Creating package.json with defaults...");
+    } else {
+        // Interactive mode - for now just use defaults
+        // (Full interactive mode would need readline support)
+        print("Creating package.json...");
+        print("  name: " + pkg_name);
+        print("  version: " + pkg_version);
+        print("  license: " + pkg_license);
+    }
+
+    let pkg = manifest.create_default(pkg_name, pkg_version);
+    pkg.description = pkg_description;
+    pkg.author = pkg_author;
+    pkg.license = pkg_license;
+
+    manifest.write_manifest(project_dir, pkg);
+    print("Created package.json");
+}
+
+// hpm install
+fn cmd_install() {
+    let project_dir = get_project_dir();
+    let verbose = has_flag("--verbose");
+    let dry_run = has_flag("--dry-run");
+    let is_dev = has_flag("--dev") || has_flag("-D");
+    let pos_args = get_positional_args();
+
+    // Read existing manifest
+    let pkg = manifest.read_manifest(project_dir);
+    if (pkg == null) {
+        print("No package.json found. Run 'hpm init' first.");
+        exit(EXIT_INVALID_MANIFEST);
+    }
+
+    // Read existing lockfile
+    let lock = lockfile.read_lockfile(project_dir);
+    if (lock == null) {
+        lock = lockfile.create_empty();
+    }
+
+    if (pos_args.length > 0) {
+        // Install specific packages
+        let i = 0;
+        while (i < pos_args.length) {
+            let spec = manifest.parse_specifier(pos_args[i]);
+            let pkg_name = spec.name;
+            let version_constraint = spec.version;
+
+            print("Adding " + pkg_name + "@" + version_constraint + "...");
+
+            // Validate package exists
+            let parts = manifest.split_name(pkg_name);
+            if (parts == null) {
+                print("Invalid package name: " + pkg_name);
+                exit(EXIT_NOT_FOUND);
+            }
+
+            // Check if package exists on GitHub
+            if (!github.repo_exists(parts.owner, parts.repo)) {
+                print("Package not found: " + pkg_name);
+                exit(EXIT_NOT_FOUND);
+            }
+
+            // If no version specified, get latest
+            if (version_constraint == "*") {
+                let versions = github.get_tags(parts.owner, parts.repo);
+                if (versions.length > 0) {
+                    let sorted = semver.sort(versions);
+                    let latest = sorted[sorted.length - 1];
+                    // Remove 'v' prefix
+                    if (latest[0] == 'v') {
+                        latest = latest.substr(1, latest.length - 1);
+                    }
+                    version_constraint = "^" + latest;
+                }
+            }
+
+            // Add to manifest
+            pkg = manifest.add_dependency(pkg, pkg_name, version_constraint, is_dev);
+
+            i = i + 1;
+        }
+
+        // Save manifest
+        manifest.write_manifest(project_dir, pkg);
+    }
+
+    // Resolve all dependencies
+    print("Resolving dependencies...");
+
+    let resolved = null;
+    try {
+        resolved = resolver.resolve(pkg, true);
+    } catch (e) {
+        print(e);
+        exit(EXIT_CONFLICT);
+    }
+
+    // Check for circular dependencies
+    let cycle = resolver.detect_cycles(resolved);
+    if (cycle != null) {
+        print("ERROR: Circular dependency detected");
+        print("");
+        print("  " + cycle.join(" -> "));
+        exit(EXIT_CIRCULAR_DEP);
+    }
+
+    if (dry_run) {
+        print("");
+        print("Would install:");
+        let keys = resolved.keys();
+        let i = 0;
+        while (i < keys.length) {
+            let pkg_name = keys[i];
+            let res = resolved.get(pkg_name);
+            print("  " + pkg_name + "@" + res.version);
+            i = i + 1;
+        }
+        exit(EXIT_SUCCESS);
+    }
+
+    // Install packages
+    print("");
+    print("Installing packages...");
+
+    try {
+        resolved = installer.install_all(resolved, project_dir, lock, verbose);
+    } catch (e) {
+        print("Installation failed: " + e);
+        exit(EXIT_NETWORK_ERROR);
+    }
+
+    // Update lockfile
+    let keys = resolved.keys();
+    let i = 0;
+    while (i < keys.length) {
+        let pkg_name = keys[i];
+        let res = resolved.get(pkg_name);
+        let entry = lockfile.create_entry(
+            res.version,
+            res.resolved,
+            res.integrity,
+            res.dependencies
+        );
+        lock = lockfile.set_locked(lock, pkg_name, entry);
+        i = i + 1;
+    }
+
+    lockfile.write_lockfile(project_dir, lock);
+
+    // Print native dependencies if any
+    check_native_deps(resolved, project_dir);
+
+    print("");
+    print("Done! Installed " + keys.length + " packages.");
+}
+
+// Check and print native dependency requirements
+fn check_native_deps(resolved, project_dir: string) {
+    let native_reqs = [];
+
+    let keys = resolved.keys();
+    let i = 0;
+    while (i < keys.length) {
+        let pkg_name = keys[i];
+        let parts = manifest.split_name(pkg_name);
+        if (parts != null) {
+            let pkg_path = project_dir + "/hem_modules/" + parts.owner + "/" + parts.repo;
+            let pkg = manifest.read_manifest(pkg_path);
+            if (pkg != null && pkg.native != null && pkg.native.requires != null) {
+                let reqs = pkg.native.requires;
+                let j = 0;
+                while (j < reqs.length) {
+                    native_reqs.push(reqs[j]);
+                    j = j + 1;
+                }
+            }
+        }
+        i = i + 1;
+    }
+
+    if (native_reqs.length > 0) {
+        print("");
+        print("Note: This package requires native libraries:");
+        i = 0;
+        while (i < native_reqs.length) {
+            print("  - " + native_reqs[i]);
+            i = i + 1;
+        }
+    }
+}
+
+// hpm uninstall
+fn cmd_uninstall() {
+    let project_dir = get_project_dir();
+    let verbose = has_flag("--verbose");
+    let pos_args = get_positional_args();
+
+    if (pos_args.length == 0) {
+        print("Usage: hpm uninstall <package>");
+        exit(EXIT_SUCCESS);
+    }
+
+    // Read manifest
+    let pkg = manifest.read_manifest(project_dir);
+    if (pkg == null) {
+        print("No package.json found.");
+        exit(EXIT_INVALID_MANIFEST);
+    }
+
+    // Read lockfile
+    let lock = lockfile.read_lockfile(project_dir);
+
+    let i = 0;
+    while (i < pos_args.length) {
+        let pkg_name = pos_args[i];
+
+        print("Uninstalling " + pkg_name + "...");
+
+        // Remove from manifest
+        pkg = manifest.remove_dependency(pkg, pkg_name);
+
+        // Uninstall from hem_modules
+        installer.uninstall_package(pkg_name, project_dir, verbose);
+
+        // Remove from lockfile
+        if (lock != null) {
+            lock = lockfile.remove_locked(lock, pkg_name);
+        }
+
+        i = i + 1;
+    }
+
+    // Save manifest and lockfile
+    manifest.write_manifest(project_dir, pkg);
+    if (lock != null) {
+        lockfile.write_lockfile(project_dir, lock);
+    }
+
+    print("Done!");
+}
+
+// hpm update
+fn cmd_update() {
+    let project_dir = get_project_dir();
+    let verbose = has_flag("--verbose");
+    let pos_args = get_positional_args();
+
+    // Read manifest
+    let pkg = manifest.read_manifest(project_dir);
+    if (pkg == null) {
+        print("No package.json found.");
+        exit(EXIT_INVALID_MANIFEST);
+    }
+
+    // For now, just re-resolve and reinstall
+    // A full update would compare with lockfile and only update changed packages
+    print("Updating dependencies...");
+
+    // Remove lockfile to force re-resolution
+    let lock = lockfile.create_empty();
+
+    // Resolve dependencies
+    let resolved = null;
+    try {
+        resolved = resolver.resolve(pkg, true);
+    } catch (e) {
+        print(e);
+        exit(EXIT_CONFLICT);
+    }
+
+    // Install packages
+    print("Installing packages...");
+    resolved = installer.install_all(resolved, project_dir, lock, verbose);
+
+    // Update lockfile
+    let keys = resolved.keys();
+    let i = 0;
+    while (i < keys.length) {
+        let pkg_name = keys[i];
+        let res = resolved.get(pkg_name);
+        let entry = lockfile.create_entry(
+            res.version,
+            res.resolved,
+            res.integrity,
+            res.dependencies
+        );
+        lock = lockfile.set_locked(lock, pkg_name, entry);
+        i = i + 1;
+    }
+
+    lockfile.write_lockfile(project_dir, lock);
+
+    print("");
+    print("Updated " + keys.length + " packages.");
+}
+
+// hpm list
+fn cmd_list() {
+    let project_dir = get_project_dir();
+    let depth = 100;  // Default to show all
+
+    // Check for --depth flag
+    let i = 1;
+    while (i < args.length) {
+        let arg = args[i];
+        if (arg.starts_with("--depth=")) {
+            let val = arg.substr(8, arg.length - 8);
+            depth = parse_int(val);
+        }
+        i = i + 1;
+    }
+
+    // Read manifest
+    let pkg = manifest.read_manifest(project_dir);
+    if (pkg == null) {
+        print("No package.json found.");
+        exit(EXIT_INVALID_MANIFEST);
+    }
+
+    // Read lockfile
+    let lock = lockfile.read_lockfile(project_dir);
+
+    // Print root
+    print(pkg.name + "@" + pkg.version);
+
+    // Get installed packages
+    let installed = installer.get_installed(project_dir);
+
+    if (installed.length == 0) {
+        print("(no dependencies)");
+        exit(EXIT_SUCCESS);
+    }
+
+    // Build and print tree
+    if (lock != null) {
+        let resolved = lock.dependencies;
+        if (resolved != null) {
+            let tree = resolver.build_tree(pkg, resolved, true);
+            print_tree(tree.children, "", depth, 0);
+        }
+    } else {
+        // No lockfile, just list installed
+        i = 0;
+        while (i < installed.length) {
+            let inst = installed[i];
+            let prefix = "";
+            if (i == installed.length - 1) {
+                prefix = "+-";
+            } else {
+                prefix = "|-";
+            }
+            print(prefix + " " + inst.name + "@" + inst.version);
+            i = i + 1;
+        }
+    }
+}
+
+fn print_tree(children: array, prefix: string, max_depth: i32, current_depth: i32) {
+    if (current_depth >= max_depth) {
+        return;
+    }
+
+    let i = 0;
+    while (i < children.length) {
+        let child = children[i];
+        let is_last = i == children.length - 1;
+
+        let connector = "";
+        if (is_last) {
+            connector = "+-";
+        } else {
+            connector = "|-";
+        }
+
+        let version = child.version;
+        if (version == null || version == "") {
+            version = "?";
+        }
+
+        print(prefix + connector + " " + child.name + "@" + version);
+
+        if (child.children != null && child.children.length > 0) {
+            let new_prefix = prefix;
+            if (is_last) {
+                new_prefix = new_prefix + "  ";
+            } else {
+                new_prefix = new_prefix + "| ";
+            }
+            print_tree(child.children, new_prefix, max_depth, current_depth + 1);
+        }
+
+        i = i + 1;
+    }
+}
+
+fn parse_int(s: string): i32 {
+    let result = 0;
+    let i = 0;
+    while (i < s.length) {
+        let ch = s[i];
+        if (ch >= '0' && ch <= '9') {
+            let digit: i32 = ch;
+            digit = digit - 48;
+            result = result * 10 + digit;
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+// hpm outdated
+fn cmd_outdated() {
+    let project_dir = get_project_dir();
+
+    // Read manifest and lockfile
+    let pkg = manifest.read_manifest(project_dir);
+    if (pkg == null) {
+        print("No package.json found.");
+        exit(EXIT_INVALID_MANIFEST);
+    }
+
+    let lock = lockfile.read_lockfile(project_dir);
+    if (lock == null || lock.dependencies == null) {
+        print("No packages installed.");
+        exit(EXIT_SUCCESS);
+    }
+
+    print("Package              Current   Wanted    Latest");
+    print("------------------------------------------------");
+
+    let has_outdated = false;
+    let keys = lock.dependencies.keys();
+    let i = 0;
+    while (i < keys.length) {
+        let pkg_name = keys[i];
+        let entry = lock.dependencies[pkg_name];
+        let current = entry.version;
+
+        // Get constraint from manifest
+        let constraint = "*";
+        if (pkg.dependencies != null && pkg.dependencies[pkg_name] != null) {
+            constraint = pkg.dependencies[pkg_name];
+        } else if (pkg.devDependencies != null && pkg.devDependencies[pkg_name] != null) {
+            constraint = pkg.devDependencies[pkg_name];
+        }
+
+        // Get available versions
+        let parts = manifest.split_name(pkg_name);
+        if (parts != null) {
+            try {
+                let versions = github.get_tags(parts.owner, parts.repo);
+                if (versions.length > 0) {
+                    let sorted = semver.sort(versions);
+                    let latest = sorted[sorted.length - 1];
+                    if (latest[0] == 'v') {
+                        latest = latest.substr(1, latest.length - 1);
+                    }
+
+                    // Find wanted (highest satisfying constraint)
+                    let parsed_constraint = semver.parse_constraint(constraint);
+                    let wanted = semver.max_satisfying(versions, parsed_constraint);
+                    if (wanted != null && wanted[0] == 'v') {
+                        wanted = wanted.substr(1, wanted.length - 1);
+                    }
+                    if (wanted == null) {
+                        wanted = current;
+                    }
+
+                    // Check if outdated
+                    let current_parsed = semver.parse(current);
+                    let latest_parsed = semver.parse(latest);
+                    let wanted_parsed = semver.parse(wanted);
+
+                    if (semver.lt(current_parsed, wanted_parsed) || semver.lt(current_parsed, latest_parsed)) {
+                        has_outdated = true;
+                        print(pad_right(pkg_name, 20) + "  " + pad_right(current, 9) + " " + pad_right(wanted, 9) + " " + latest);
+                    }
+                }
+            } catch (e) {
+                // Skip packages we can't check
+            }
+        }
+
+        i = i + 1;
+    }
+
+    if (!has_outdated) {
+        print("All packages are up to date!");
+    }
+}
+
+fn pad_right(s: string, width: i32): string {
+    let result = s;
+    while (result.length < width) {
+        result = result + " ";
+    }
+    return result;
+}
+
+// hpm run
+fn cmd_run() {
+    let project_dir = get_project_dir();
+    let pos_args = get_positional_args();
+
+    if (pos_args.length == 0) {
+        print("Usage: hpm run <script>");
+        exit(EXIT_SUCCESS);
+    }
+
+    let script_name = pos_args[0];
+
+    // Read manifest
+    let pkg = manifest.read_manifest(project_dir);
+    if (pkg == null) {
+        print("No package.json found.");
+        exit(EXIT_INVALID_MANIFEST);
+    }
+
+    if (pkg.scripts == null || pkg.scripts[script_name] == null) {
+        print("Script not found: " + script_name);
+        exit(EXIT_NOT_FOUND);
+    }
+
+    let script_cmd = pkg.scripts[script_name];
+    print("> " + script_cmd);
+    print("");
+
+    // Execute the script
+    // Parse command and arguments
+    let parts = script_cmd.split(" ");
+    let cmd = parts[0];
+    let cmd_args = [];
+    let i = 1;
+    while (i < parts.length) {
+        cmd_args.push(parts[i]);
+        i = i + 1;
+    }
+
+    // Fork and exec
+    let pid = fork();
+    if (pid == 0) {
+        // Child process
+        exec(cmd, cmd_args);
+        exit(1);  // exec failed
+    } else {
+        // Parent - wait for child
+        let status = waitpid(pid);
+        exit(status);
+    }
+}
+
+// hpm test (shorthand for hpm run test)
+fn cmd_test() {
+    // Modify args to simulate "hpm run test"
+    cmd_run_with_script("test");
+}
+
+fn cmd_run_with_script(script_name: string) {
+    let project_dir = get_project_dir();
+
+    // Read manifest
+    let pkg = manifest.read_manifest(project_dir);
+    if (pkg == null) {
+        print("No package.json found.");
+        exit(EXIT_INVALID_MANIFEST);
+    }
+
+    if (pkg.scripts == null || pkg.scripts[script_name] == null) {
+        print("Script not found: " + script_name);
+        exit(EXIT_NOT_FOUND);
+    }
+
+    let script_cmd = pkg.scripts[script_name];
+    print("> " + script_cmd);
+    print("");
+
+    // Execute the script
+    let parts = script_cmd.split(" ");
+    let cmd = parts[0];
+    let cmd_args = [];
+    let i = 1;
+    while (i < parts.length) {
+        cmd_args.push(parts[i]);
+        i = i + 1;
+    }
+
+    let pid = fork();
+    if (pid == 0) {
+        exec(cmd, cmd_args);
+        exit(1);
+    } else {
+        let status = waitpid(pid);
+        exit(status);
+    }
+}
+
+// hpm why
+fn cmd_why() {
+    let project_dir = get_project_dir();
+    let pos_args = get_positional_args();
+
+    if (pos_args.length == 0) {
+        print("Usage: hpm why <package>");
+        exit(EXIT_SUCCESS);
+    }
+
+    let pkg_name = pos_args[0];
+
+    // Read manifest and lockfile
+    let pkg = manifest.read_manifest(project_dir);
+    if (pkg == null) {
+        print("No package.json found.");
+        exit(EXIT_INVALID_MANIFEST);
+    }
+
+    let lock = lockfile.read_lockfile(project_dir);
+    if (lock == null) {
+        print("No packages installed.");
+        exit(EXIT_SUCCESS);
+    }
+
+    // Check if package is installed
+    let entry = lockfile.get_locked(lock, pkg_name);
+    if (entry == null) {
+        print("Package not installed: " + pkg_name);
+        exit(EXIT_NOT_FOUND);
+    }
+
+    print(pkg_name + "@" + entry.version);
+
+    // Find dependency chains
+    let chains = resolver.find_why(pkg_name, pkg, lock.dependencies);
+
+    if (chains.length == 0) {
+        print("  (direct dependency)");
+    } else {
+        let i = 0;
+        while (i < chains.length) {
+            let chain = chains[i];
+            let j = 1;
+            let indent = "";
+            while (j < chain.length) {
+                print(indent + "+- " + chain[j]);
+                indent = indent + "   ";
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+    }
+}
+
+// hpm cache
+fn cmd_cache() {
+    let pos_args = get_positional_args();
+    let subcmd = "list";
+
+    if (pos_args.length > 0) {
+        subcmd = pos_args[0];
+    }
+
+    if (subcmd == "list") {
+        let packages = cache.list_cached();
+
+        if (packages.length == 0) {
+            print("Cache is empty.");
+            exit(EXIT_SUCCESS);
+        }
+
+        print("Cached packages:");
+        let i = 0;
+        while (i < packages.length) {
+            let pkg = packages[i];
+            print("  " + pkg.name + "@" + pkg.version);
+            i = i + 1;
+        }
+
+        let size = cache.get_cache_size();
+        print("");
+        print("Total: " + packages.length + " packages, " + format_size(size));
+    } else if (subcmd == "clean") {
+        print("Clearing cache...");
+        let count = cache.clear_cache();
+        print("Removed " + count + " packages.");
+    } else {
+        print("Usage: hpm cache [list|clean]");
+    }
+}
+
+fn format_size(bytes: i64): string {
+    if (bytes < 1024) {
+        return "" + bytes + " B";
+    }
+    if (bytes < 1048576) {
+        let kb = bytes / 1024;
+        return "" + kb + " KB";
+    }
+    let mb = bytes / 1048576;
+    return "" + mb + " MB";
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+fn main() {
+    // Check for help or version flags
+    if (has_flag("--help") || has_flag("-h")) {
+        print_usage();
+        exit(EXIT_SUCCESS);
+    }
+
+    if (has_flag("--version") || has_flag("-v")) {
+        print_version();
+        exit(EXIT_SUCCESS);
+    }
+
+    // Get command
+    if (args.length < 2) {
+        print_usage();
+        exit(EXIT_SUCCESS);
+    }
+
+    let command = args[1];
+
+    // Handle shorthand commands
+    if (command == "i") {
+        command = "install";
+    } else if (command == "rm" || command == "remove") {
+        command = "uninstall";
+    } else if (command == "ls") {
+        command = "list";
+    } else if (command == "up") {
+        command = "update";
+    }
+
+    // Dispatch to command handler
+    if (command == "init") {
+        cmd_init();
+    } else if (command == "install") {
+        cmd_install();
+    } else if (command == "uninstall") {
+        cmd_uninstall();
+    } else if (command == "update") {
+        cmd_update();
+    } else if (command == "list") {
+        cmd_list();
+    } else if (command == "outdated") {
+        cmd_outdated();
+    } else if (command == "run") {
+        cmd_run();
+    } else if (command == "test") {
+        cmd_test();
+    } else if (command == "why") {
+        cmd_why();
+    } else if (command == "cache") {
+        cmd_cache();
+    } else if (command == "help") {
+        print_usage();
+    } else if (command == "version") {
+        print_version();
+    } else {
+        print("Unknown command: " + command);
+        print("Run 'hpm --help' for usage.");
+        exit(1);
+    }
+
+    exit(EXIT_SUCCESS);
+}
+
+// Run main
+main();

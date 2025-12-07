@@ -1,0 +1,405 @@
+// hpm - Dependency resolver
+
+import { HashMap, Set } from "@stdlib/collections";
+import * as semver from "./semver.hml";
+import * as github from "./github.hml";
+import * as manifest from "./manifest.hml";
+
+// Resolve dependencies for a package
+// Returns a flat map of package name -> resolved version info
+export fn resolve(root_manifest, include_dev: bool) {
+    let resolved = HashMap();
+    let constraints = HashMap();  // package name -> list of {from, constraint}
+    let visited = Set();
+    let to_visit = [];
+
+    // Start with root dependencies
+    let root_deps = manifest.get_all_dependencies(root_manifest, include_dev);
+    let dep_keys = root_deps.keys();
+
+    let i = 0;
+    while (i < dep_keys.length) {
+        let dep_name = dep_keys[i];
+        let constraint_str = root_deps[dep_name];
+
+        // Add constraint from root
+        add_constraint(constraints, dep_name, "(root)", constraint_str);
+
+        // Queue for resolution
+        to_visit.push({
+            name: dep_name,
+            constraint: constraint_str
+        });
+
+        i = i + 1;
+    }
+
+    // Process queue
+    while (to_visit.length > 0) {
+        let current = to_visit.shift();
+        let pkg_name = current.name;
+
+        // Skip if already resolved
+        if (resolved.has(pkg_name)) {
+            continue;
+        }
+
+        // Get all constraints for this package
+        let pkg_constraints = constraints.get(pkg_name);
+        if (pkg_constraints == null) {
+            pkg_constraints = [];
+        }
+
+        // Resolve the version
+        let resolution = resolve_version(pkg_name, pkg_constraints);
+        if (resolution == null) {
+            throw "Failed to resolve " + pkg_name;
+        }
+
+        resolved.set(pkg_name, resolution);
+
+        // Process transitive dependencies
+        if (resolution.dependencies != null) {
+            let trans_keys = resolution.dependencies.keys();
+            let j = 0;
+            while (j < trans_keys.length) {
+                let trans_name = trans_keys[j];
+                let trans_constraint = resolution.dependencies[trans_name];
+
+                // Add constraint from this package
+                add_constraint(constraints, trans_name, pkg_name, trans_constraint);
+
+                // Queue for resolution if not already resolved
+                if (!resolved.has(trans_name)) {
+                    to_visit.push({
+                        name: trans_name,
+                        constraint: trans_constraint
+                    });
+                } else {
+                    // Check for conflict
+                    let existing = resolved.get(trans_name);
+                    let parsed_constraint = semver.parse_constraint(trans_constraint);
+                    let existing_ver = semver.parse(existing.version);
+
+                    if (!semver.satisfies(existing_ver, parsed_constraint)) {
+                        throw format_conflict_error(trans_name, constraints.get(trans_name));
+                    }
+                }
+
+                j = j + 1;
+            }
+        }
+    }
+
+    return resolved;
+}
+
+// Add a constraint to the constraints map
+fn add_constraint(constraints, pkg_name: string, source: string, constraint_str: string) {
+    let existing = constraints.get(pkg_name);
+    if (existing == null) {
+        existing = [];
+    }
+    existing.push({
+        source: source,
+        constraint: constraint_str
+    });
+    constraints.set(pkg_name, existing);
+}
+
+// Resolve a specific version given constraints
+fn resolve_version(pkg_name: string, pkg_constraints: array) {
+    // Parse package name
+    let parts = manifest.split_name(pkg_name);
+    if (parts == null) {
+        throw "Invalid package name: " + pkg_name;
+    }
+
+    // Get available versions from GitHub
+    let versions = github.get_tags(parts.owner, parts.repo);
+    if (versions.length == 0) {
+        throw "No versions found for " + pkg_name;
+    }
+
+    // Parse all constraints
+    let parsed_constraints = [];
+    let i = 0;
+    while (i < pkg_constraints.length) {
+        parsed_constraints.push(semver.parse_constraint(pkg_constraints[i].constraint));
+        i = i + 1;
+    }
+
+    // Find the highest version that satisfies all constraints
+    let best_version = null;
+    let best_parsed = null;
+
+    // Sort versions descending to find highest first
+    let sorted = semver.sort(versions);
+    i = sorted.length - 1;
+    while (i >= 0) {
+        let ver_str = sorted[i];
+        let parsed = semver.parse(ver_str);
+
+        // Check if satisfies all constraints
+        let satisfies_all = true;
+        let j = 0;
+        while (j < parsed_constraints.length) {
+            if (!semver.satisfies(parsed, parsed_constraints[j])) {
+                satisfies_all = false;
+                break;
+            }
+            j = j + 1;
+        }
+
+        if (satisfies_all) {
+            best_version = ver_str;
+            best_parsed = parsed;
+            break;
+        }
+
+        i = i - 1;
+    }
+
+    if (best_version == null) {
+        throw format_conflict_error(pkg_name, pkg_constraints);
+    }
+
+    // Get package.json for this version to get transitive dependencies
+    let pkg_json = github.get_package_json(parts.owner, parts.repo, best_version);
+    let deps = null;
+    if (pkg_json != null && pkg_json.dependencies != null) {
+        deps = pkg_json.dependencies;
+    }
+
+    // Get tarball URL
+    let tarball_url = github.get_tarball_url(parts.owner, parts.repo, best_version);
+
+    // Remove 'v' prefix for clean version string
+    let clean_version = best_version;
+    if (clean_version.length > 0 && clean_version[0] == 'v') {
+        clean_version = clean_version.substr(1, clean_version.length - 1);
+    }
+
+    return {
+        version: clean_version,
+        resolved: tarball_url,
+        integrity: "",  // Will be filled after download
+        dependencies: deps
+    };
+}
+
+// Format a conflict error message
+fn format_conflict_error(pkg_name: string, pkg_constraints: array): string {
+    let msg = "ERROR: Dependency conflict for '" + pkg_name + "'\n\n";
+
+    let i = 0;
+    while (i < pkg_constraints.length) {
+        let c = pkg_constraints[i];
+        msg = msg + "  " + c.source + " requires " + pkg_name + "@" + c.constraint + "\n";
+        i = i + 1;
+    }
+
+    msg = msg + "\nThese ranges have no overlap.\n";
+    msg = msg + "\nSuggestions:\n";
+    msg = msg + "  - Check if dependents have newer versions with compatible requirements\n";
+    msg = msg + "  - Contact package maintainers to align versions\n";
+    msg = msg + "\nRun 'hpm why " + pkg_name + "' for full dependency chain.";
+
+    return msg;
+}
+
+// Detect circular dependencies
+export fn detect_cycles(resolved) {
+    let visited = Set();
+    let rec_stack = Set();
+    let cycle_path = [];
+
+    let keys = resolved.keys();
+    let i = 0;
+    while (i < keys.length) {
+        let pkg = keys[i];
+        if (!visited.has(pkg)) {
+            let cycle = dfs_cycle(pkg, resolved, visited, rec_stack, cycle_path);
+            if (cycle != null) {
+                return cycle;
+            }
+        }
+        i = i + 1;
+    }
+
+    return null;
+}
+
+// DFS helper for cycle detection
+fn dfs_cycle(pkg: string, resolved, visited, rec_stack, path: array) {
+    visited.add(pkg);
+    rec_stack.add(pkg);
+    path.push(pkg);
+
+    let entry = resolved.get(pkg);
+    if (entry != null && entry.dependencies != null) {
+        let dep_keys = entry.dependencies.keys();
+        let i = 0;
+        while (i < dep_keys.length) {
+            let dep = dep_keys[i];
+
+            if (!visited.has(dep)) {
+                let cycle = dfs_cycle(dep, resolved, visited, rec_stack, path);
+                if (cycle != null) {
+                    return cycle;
+                }
+            } else if (rec_stack.has(dep)) {
+                // Found cycle - build path
+                let cycle_start = path.find(fn(x) { return x == dep; });
+                let cycle = [];
+                let j = 0;
+                let found = false;
+                while (j < path.length) {
+                    if (path[j] == dep) {
+                        found = true;
+                    }
+                    if (found) {
+                        cycle.push(path[j]);
+                    }
+                    j = j + 1;
+                }
+                cycle.push(dep);
+                return cycle;
+            }
+
+            i = i + 1;
+        }
+    }
+
+    path.pop();
+    rec_stack.delete(pkg);
+    return null;
+}
+
+// Build dependency tree for display
+export fn build_tree(root_manifest, resolved, include_dev: bool) {
+    let tree = {
+        name: root_manifest.name,
+        version: root_manifest.version,
+        children: []
+    };
+
+    let root_deps = manifest.get_all_dependencies(root_manifest, include_dev);
+    let dep_keys = root_deps.keys();
+
+    let i = 0;
+    while (i < dep_keys.length) {
+        let dep_name = dep_keys[i];
+        let child = build_tree_node(dep_name, resolved, Set());
+        tree.children.push(child);
+        i = i + 1;
+    }
+
+    return tree;
+}
+
+// Build a tree node recursively
+fn build_tree_node(pkg_name: string, resolved, visited) {
+    let entry = resolved.get(pkg_name);
+    let version = "";
+    if (entry != null) {
+        version = entry.version;
+    }
+
+    let node = {
+        name: pkg_name,
+        version: version,
+        children: []
+    };
+
+    // Prevent infinite recursion
+    if (visited.has(pkg_name)) {
+        node.circular = true;
+        return node;
+    }
+    visited.add(pkg_name);
+
+    // Add children
+    if (entry != null && entry.dependencies != null) {
+        let dep_keys = entry.dependencies.keys();
+        let i = 0;
+        while (i < dep_keys.length) {
+            let dep = dep_keys[i];
+            let child = build_tree_node(dep, resolved, visited);
+            node.children.push(child);
+            i = i + 1;
+        }
+    }
+
+    visited.delete(pkg_name);
+    return node;
+}
+
+// Find why a package is installed (reverse dependency chain)
+export fn find_why(pkg_name: string, root_manifest, resolved) {
+    let chains = [];
+
+    // Check if it's a direct dependency
+    if (root_manifest.dependencies != null && root_manifest.dependencies[pkg_name] != null) {
+        chains.push([pkg_name, root_manifest.name + " (root)"]);
+    }
+    if (root_manifest.devDependencies != null && root_manifest.devDependencies[pkg_name] != null) {
+        chains.push([pkg_name, root_manifest.name + " (root)"]);
+    }
+
+    // Find indirect dependencies
+    let keys = resolved.keys();
+    let i = 0;
+    while (i < keys.length) {
+        let parent = keys[i];
+        let entry = resolved.get(parent);
+        if (entry != null && entry.dependencies != null) {
+            if (entry.dependencies[pkg_name] != null) {
+                // Build chain from this parent to root
+                let chain = build_why_chain(parent, root_manifest, resolved);
+                chain.unshift(pkg_name);
+                chains.push(chain);
+            }
+        }
+        i = i + 1;
+    }
+
+    return chains;
+}
+
+// Build chain from package to root
+fn build_why_chain(pkg_name: string, root_manifest, resolved): array {
+    let chain = [pkg_name];
+
+    // Check if direct dependency
+    if (root_manifest.dependencies != null && root_manifest.dependencies[pkg_name] != null) {
+        chain.push(root_manifest.name + " (root)");
+        return chain;
+    }
+    if (root_manifest.devDependencies != null && root_manifest.devDependencies[pkg_name] != null) {
+        chain.push(root_manifest.name + " (root)");
+        return chain;
+    }
+
+    // Find parent
+    let keys = resolved.keys();
+    let i = 0;
+    while (i < keys.length) {
+        let parent = keys[i];
+        let entry = resolved.get(parent);
+        if (entry != null && entry.dependencies != null) {
+            if (entry.dependencies[pkg_name] != null) {
+                let parent_chain = build_why_chain(parent, root_manifest, resolved);
+                let j = 0;
+                while (j < parent_chain.length) {
+                    chain.push(parent_chain[j]);
+                    j = j + 1;
+                }
+                return chain;
+            }
+        }
+        i = i + 1;
+    }
+
+    return chain;
+}

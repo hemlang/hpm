@@ -1,0 +1,375 @@
+// hpm - Package installer (downloads, extracts, installs packages)
+
+import { exists, read_file, write_file, make_dir, remove_dir, list_dir, is_dir } from "@stdlib/fs";
+import { sha256 } from "@stdlib/hash";
+import { gunzip, TarReader } from "@stdlib/compression";
+
+import * as github from "./github.hml";
+import * as cache from "./cache.hml";
+import * as manifest from "./manifest.hml";
+
+// Install a resolved package to hem_modules
+export fn install_package(pkg_name: string, resolution, project_dir: string, verbose: bool) {
+    let parts = manifest.split_name(pkg_name);
+    if (parts == null) {
+        throw "Invalid package name: " + pkg_name;
+    }
+
+    let owner = parts.owner;
+    let repo = parts.repo;
+    let version = resolution.version;
+
+    // Add 'v' prefix for version if not present (for GitHub tags)
+    let tag_version = version;
+    if (tag_version.length > 0 && tag_version[0] != 'v') {
+        tag_version = "v" + tag_version;
+    }
+
+    if (verbose) {
+        print("  Installing " + pkg_name + "@" + version);
+    }
+
+    // Check cache first
+    let tarball_data = null;
+    if (cache.is_cached(owner, repo, version)) {
+        if (verbose) {
+            print("    Using cached tarball");
+        }
+        tarball_data = cache.read_tarball(owner, repo, version);
+    } else {
+        // Download tarball
+        if (verbose) {
+            print("    Downloading from GitHub...");
+        }
+        tarball_data = github.download_tarball(owner, repo, tag_version);
+
+        // Store in cache
+        cache.store_tarball(owner, repo, version, tarball_data);
+    }
+
+    // Calculate integrity hash
+    let integrity = "sha256-" + sha256(tarball_data);
+
+    // Convert string to buffer if needed for decompression
+    let tarball_buffer = null;
+    if (typeof(tarball_data) == "buffer") {
+        tarball_buffer = tarball_data;
+    } else {
+        // Convert string to buffer
+        let bytes = tarball_data.bytes();
+        tarball_buffer = buffer(bytes.length);
+        let i = 0;
+        while (i < bytes.length) {
+            tarball_buffer[i] = bytes[i];
+            i = i + 1;
+        }
+    }
+
+    // Decompress gzip
+    if (verbose) {
+        print("    Extracting...");
+    }
+    let tar_data = gunzip(tarball_buffer);
+
+    // Convert decompressed string to buffer for TarReader
+    let tar_bytes = tar_data.bytes();
+    let tar_buffer = buffer(tar_bytes.length);
+    let i = 0;
+    while (i < tar_bytes.length) {
+        tar_buffer[i] = tar_bytes[i];
+        i = i + 1;
+    }
+
+    // Read tar archive
+    let reader = TarReader(tar_buffer);
+    let entries = reader.entries();
+
+    // Create installation directory
+    let install_dir = project_dir + "/hem_modules/" + owner + "/" + repo;
+    ensure_dir_recursive(project_dir + "/hem_modules");
+    ensure_dir_recursive(project_dir + "/hem_modules/" + owner);
+
+    // Remove existing installation if present
+    if (exists(install_dir)) {
+        remove_dir_recursive(install_dir);
+    }
+    make_dir(install_dir);
+
+    // Extract files
+    // GitHub tarballs have a root directory like "repo-version/"
+    // We need to strip this prefix
+    let root_prefix = "";
+    i = 0;
+    while (i < entries.length) {
+        let entry = entries[i];
+        if (entry.type == '5' && root_prefix == "") {
+            // First directory is the root
+            root_prefix = entry.name;
+            break;
+        }
+        i = i + 1;
+    }
+
+    // Extract each entry
+    i = 0;
+    while (i < entries.length) {
+        let entry = entries[i];
+        let name = entry.name;
+
+        // Strip root prefix
+        if (root_prefix.length > 0 && name.starts_with(root_prefix)) {
+            name = name.substr(root_prefix.length, name.length - root_prefix.length);
+        }
+
+        // Skip empty names (the root directory itself)
+        if (name.length == 0 || name == "/") {
+            i = i + 1;
+            continue;
+        }
+
+        // Remove leading slash if present
+        if (name[0] == '/') {
+            name = name.substr(1, name.length - 1);
+        }
+
+        let target_path = install_dir + "/" + name;
+
+        if (entry.type == '5') {
+            // Directory
+            ensure_dir_recursive(target_path);
+        } else if (entry.type == '0') {
+            // Regular file
+            // Ensure parent directory exists
+            let last_slash = name.find_last("/");
+            if (last_slash > 0) {
+                let parent = install_dir + "/" + name.substr(0, last_slash);
+                ensure_dir_recursive(parent);
+            }
+
+            write_file(target_path, entry.content);
+        }
+
+        i = i + 1;
+    }
+
+    return integrity;
+}
+
+// Helper to find last occurrence of character
+fn find_last(s: string, ch: rune): i32 {
+    let last = -1;
+    let i = 0;
+    while (i < s.length) {
+        if (s[i] == ch) {
+            last = i;
+        }
+        i = i + 1;
+    }
+    return last;
+}
+
+// Ensure directory exists recursively
+fn ensure_dir_recursive(path: string) {
+    if (exists(path)) {
+        return;
+    }
+
+    let parts = path.split("/");
+    let current = "";
+
+    let i = 0;
+    while (i < parts.length) {
+        let part = parts[i];
+        if (part.length > 0) {
+            if (current.length == 0 && path[0] == '/') {
+                current = "/" + part;
+            } else if (current.length == 0) {
+                current = part;
+            } else {
+                current = current + "/" + part;
+            }
+
+            if (!exists(current)) {
+                make_dir(current);
+            }
+        }
+        i = i + 1;
+    }
+}
+
+// Remove directory recursively
+fn remove_dir_recursive(path: string) {
+    if (!exists(path)) {
+        return;
+    }
+
+    if (!is_dir(path)) {
+        remove_file(path);
+        return;
+    }
+
+    // List and remove contents
+    let entries = list_dir(path);
+    let i = 0;
+    while (i < entries.length) {
+        let entry = entries[i];
+        let entry_path = path + "/" + entry;
+        if (is_dir(entry_path)) {
+            remove_dir_recursive(entry_path);
+        } else {
+            remove_file(entry_path);
+        }
+        i = i + 1;
+    }
+
+    // Remove the directory itself
+    remove_dir(path);
+}
+
+// Import remove_file from fs
+import { remove_file } from "@stdlib/fs";
+
+// Install all resolved packages
+export fn install_all(resolved, project_dir: string, lockfile, verbose: bool) {
+    let keys = resolved.keys();
+    let i = 0;
+    while (i < keys.length) {
+        let pkg_name = keys[i];
+        let resolution = resolved.get(pkg_name);
+
+        // Install the package
+        let integrity = install_package(pkg_name, resolution, project_dir, verbose);
+
+        // Update resolution with integrity
+        resolution.integrity = integrity;
+        resolved.set(pkg_name, resolution);
+
+        i = i + 1;
+    }
+
+    return resolved;
+}
+
+// Uninstall a package from hem_modules
+export fn uninstall_package(pkg_name: string, project_dir: string, verbose: bool) {
+    let parts = manifest.split_name(pkg_name);
+    if (parts == null) {
+        throw "Invalid package name: " + pkg_name;
+    }
+
+    let owner = parts.owner;
+    let repo = parts.repo;
+
+    let install_dir = project_dir + "/hem_modules/" + owner + "/" + repo;
+
+    if (!exists(install_dir)) {
+        if (verbose) {
+            print("  Package " + pkg_name + " not installed");
+        }
+        return false;
+    }
+
+    if (verbose) {
+        print("  Removing " + pkg_name);
+    }
+
+    remove_dir_recursive(install_dir);
+
+    // Clean up empty owner directory
+    let owner_dir = project_dir + "/hem_modules/" + owner;
+    let remaining = list_dir(owner_dir);
+    if (remaining.length == 0) {
+        remove_dir(owner_dir);
+    }
+
+    return true;
+}
+
+// Check what packages are currently installed
+export fn get_installed(project_dir: string) {
+    let installed = [];
+    let modules_dir = project_dir + "/hem_modules";
+
+    if (!exists(modules_dir)) {
+        return installed;
+    }
+
+    // List owners
+    let owners = list_dir(modules_dir);
+    let i = 0;
+    while (i < owners.length) {
+        let owner = owners[i];
+        let owner_path = modules_dir + "/" + owner;
+
+        if (is_dir(owner_path)) {
+            // List repos
+            let repos = list_dir(owner_path);
+            let j = 0;
+            while (j < repos.length) {
+                let repo = repos[j];
+                let repo_path = owner_path + "/" + repo;
+
+                if (is_dir(repo_path)) {
+                    // Check for package.json to get version
+                    let pkg_json_path = repo_path + "/package.json";
+                    let version = "unknown";
+
+                    if (exists(pkg_json_path)) {
+                        try {
+                            let pkg = manifest.read_manifest(repo_path);
+                            if (pkg != null && pkg.version != null) {
+                                version = pkg.version;
+                            }
+                        } catch (e) {
+                            // Ignore parse errors
+                        }
+                    }
+
+                    installed.push({
+                        name: owner + "/" + repo,
+                        version: version,
+                        path: repo_path
+                    });
+                }
+                j = j + 1;
+            }
+        }
+        i = i + 1;
+    }
+
+    return installed;
+}
+
+// Verify integrity of installed packages
+export fn verify_integrity(project_dir: string, lockfile) {
+    let issues = [];
+
+    if (lockfile == null || lockfile.dependencies == null) {
+        return issues;
+    }
+
+    let keys = lockfile.dependencies.keys();
+    let i = 0;
+    while (i < keys.length) {
+        let pkg_name = keys[i];
+        let entry = lockfile.dependencies[pkg_name];
+        let parts = manifest.split_name(pkg_name);
+
+        if (parts != null) {
+            let install_dir = project_dir + "/hem_modules/" + parts.owner + "/" + parts.repo;
+
+            if (!exists(install_dir)) {
+                issues.push({
+                    package: pkg_name,
+                    issue: "not installed"
+                });
+            }
+            // Note: Full integrity verification would require re-downloading
+            // and comparing hashes, which is expensive. Skip for now.
+        }
+
+        i = i + 1;
+    }
+
+    return issues;
+}

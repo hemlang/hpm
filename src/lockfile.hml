@@ -1,0 +1,142 @@
+// hpm - Lock file (package-lock.json) handling
+
+import { parse, stringify, pretty } from "@stdlib/json";
+import { exists, read_file, write_file } from "@stdlib/fs";
+
+// Lock file version
+let LOCK_VERSION = 1;
+
+// Create an empty lock file structure
+export fn create_empty() {
+    return {
+        lockVersion: LOCK_VERSION,
+        hemlock: "1.0.0",
+        dependencies: {}
+    };
+}
+
+// Read and parse package-lock.json from a directory
+export fn read_lockfile(dir: string) {
+    let path = dir + "/package-lock.json";
+
+    if (!exists(path)) {
+        return null;
+    }
+
+    let content = read_file(path);
+    if (content == null || content.length == 0) {
+        return null;
+    }
+
+    try {
+        return parse(content);
+    } catch (e) {
+        throw "Failed to parse package-lock.json: " + e;
+    }
+}
+
+// Write package-lock.json to a directory
+export fn write_lockfile(dir: string, lockfile) {
+    let path = dir + "/package-lock.json";
+    let content = pretty(lockfile, 2);
+    write_file(path, content + "\n");
+    return null;
+}
+
+// Get a locked dependency entry
+export fn get_locked(lockfile, name: string) {
+    if (lockfile == null || lockfile.dependencies == null) {
+        return null;
+    }
+    return lockfile.dependencies[name];
+}
+
+// Set a locked dependency entry
+export fn set_locked(lockfile, name: string, entry) {
+    if (lockfile.dependencies == null) {
+        lockfile.dependencies = {};
+    }
+    lockfile.dependencies[name] = entry;
+    return lockfile;
+}
+
+// Remove a locked dependency entry
+export fn remove_locked(lockfile, name: string) {
+    if (lockfile == null || lockfile.dependencies == null) {
+        return lockfile;
+    }
+
+    let new_deps = {};
+    let keys = lockfile.dependencies.keys();
+    let i = 0;
+    while (i < keys.length) {
+        let key = keys[i];
+        if (key != name) {
+            new_deps[key] = lockfile.dependencies[key];
+        }
+        i = i + 1;
+    }
+    lockfile.dependencies = new_deps;
+
+    return lockfile;
+}
+
+// Create a lock entry for a package
+export fn create_entry(version: string, resolved: string, integrity: string, dependencies) {
+    let entry = {
+        version: version,
+        resolved: resolved,
+        integrity: integrity
+    };
+
+    if (dependencies != null) {
+        let keys = dependencies.keys();
+        if (keys.length > 0) {
+            entry.dependencies = dependencies;
+        }
+    }
+
+    return entry;
+}
+
+// Get all locked package names
+export fn get_locked_names(lockfile) {
+    if (lockfile == null || lockfile.dependencies == null) {
+        return [];
+    }
+    return lockfile.dependencies.keys();
+}
+
+// Check if lockfile needs updating based on manifest
+export fn needs_update(lockfile, manifest) {
+    if (lockfile == null) {
+        return true;
+    }
+
+    // Check if all manifest dependencies are in lockfile
+    if (manifest.dependencies != null) {
+        let dep_keys = manifest.dependencies.keys();
+        let i = 0;
+        while (i < dep_keys.length) {
+            let dep = dep_keys[i];
+            if (lockfile.dependencies == null || lockfile.dependencies[dep] == null) {
+                return true;
+            }
+            i = i + 1;
+        }
+    }
+
+    if (manifest.devDependencies != null) {
+        let dep_keys = manifest.devDependencies.keys();
+        let i = 0;
+        while (i < dep_keys.length) {
+            let dep = dep_keys[i];
+            if (lockfile.dependencies == null || lockfile.dependencies[dep] == null) {
+                return true;
+            }
+            i = i + 1;
+        }
+    }
+
+    return false;
+}

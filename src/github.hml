@@ -1,0 +1,233 @@
+// hpm - GitHub API client
+
+import { get, is_success } from "@stdlib/http";
+import { parse } from "@stdlib/json";
+import { getenv } from "@stdlib/env";
+import { exists, read_file } from "@stdlib/fs";
+
+// Get GitHub token from environment or config
+export fn get_token() {
+    // First check environment variable
+    let token = getenv("GITHUB_TOKEN");
+    if (token != null && token.length > 0) {
+        return token;
+    }
+
+    // Then check config file
+    let home = getenv("HOME");
+    if (home != null) {
+        let config_path = home + "/.hpm/config.json";
+        if (exists(config_path)) {
+            try {
+                let content = read_file(config_path);
+                let config = parse(content);
+                if (config.github_token != null) {
+                    return config.github_token;
+                }
+            } catch (e) {
+                // Ignore config parse errors
+            }
+        }
+    }
+
+    return null;
+}
+
+// Make an authenticated GitHub API request
+fn github_request(url: string) {
+    let headers = [];
+    let token = get_token();
+
+    if (token != null && token.length > 0) {
+        headers.push("Authorization: Bearer " + token);
+    }
+
+    headers.push("Accept: application/vnd.github.v3+json");
+    headers.push("User-Agent: hpm/1.0.0");
+
+    let response = get(url, headers);
+
+    if (response.status_code == 403) {
+        // Check for rate limit
+        throw "GitHub API rate limit exceeded. Set GITHUB_TOKEN to increase limit.";
+    }
+
+    if (response.status_code == 404) {
+        return null;
+    }
+
+    if (!is_success(response.status_code)) {
+        throw "GitHub API error: HTTP " + response.status_code;
+    }
+
+    return parse(response.body);
+}
+
+// Get list of tags (versions) for a repository
+export fn get_tags(owner: string, repo: string) {
+    let url = "https://api.github.com/repos/" + owner + "/" + repo + "/tags";
+    let data = github_request(url);
+
+    if (data == null) {
+        return [];
+    }
+
+    // Extract tag names that look like versions (start with 'v')
+    let versions = [];
+    let i = 0;
+    while (i < data.length) {
+        let tag = data[i];
+        let name = tag.name;
+        if (name != null && name.length > 0) {
+            // Only include tags that start with 'v' (version tags)
+            if (name[0] == 'v') {
+                versions.push(name);
+            }
+        }
+        i = i + 1;
+    }
+
+    return versions;
+}
+
+// Get package.json content from a repository at a specific git ref
+export fn get_package_json(owner: string, repo: string, git_ref: string) {
+    let url = "https://api.github.com/repos/" + owner + "/" + repo + "/contents/package.json?ref=" + git_ref;
+    let data = github_request(url);
+
+    if (data == null) {
+        return null;
+    }
+
+    // GitHub returns base64 encoded content
+    let content = data.content;
+    if (content == null) {
+        return null;
+    }
+
+    // Decode base64 content
+    // Note: Need to handle base64 decoding - for now use raw content if available
+    // The content field contains base64, we need to decode it
+    let decoded = base64_decode(content);
+    if (decoded == null) {
+        return null;
+    }
+
+    try {
+        return parse(decoded);
+    } catch (e) {
+        return null;
+    }
+}
+
+// Simple base64 decode implementation
+fn base64_decode(encoded: string): string {
+    let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    // Build reverse lookup
+    let lookup = [];
+    let i = 0;
+    while (i < 256) {
+        lookup.push(-1);
+        i = i + 1;
+    }
+
+    i = 0;
+    while (i < 64) {
+        let ch: i32 = alphabet[i];
+        lookup[ch] = i;
+        i = i + 1;
+    }
+
+    // Remove whitespace and padding
+    let clean = "";
+    i = 0;
+    while (i < encoded.length) {
+        let ch = encoded[i];
+        if (ch != '\n' && ch != '\r' && ch != ' ' && ch != '=') {
+            clean = clean + ch;
+        }
+        i = i + 1;
+    }
+
+    // Decode
+    let result = "";
+    let buf = 0;
+    let bits = 0;
+
+    i = 0;
+    while (i < clean.length) {
+        let ch: i32 = clean[i];
+        let val = lookup[ch];
+
+        if (val >= 0) {
+            buf = (buf << 6) | val;
+            bits = bits + 6;
+
+            if (bits >= 8) {
+                bits = bits - 8;
+                let byte_val = (buf >> bits) & 255;
+                let char_val: rune = byte_val;
+                result = result + char_val;
+            }
+        }
+
+        i = i + 1;
+    }
+
+    return result;
+}
+
+// Get tarball download URL for a specific version
+export fn get_tarball_url(owner: string, repo: string, version: string): string {
+    // Ensure version has 'v' prefix
+    let tag = version;
+    if (tag.length > 0 && tag[0] != 'v') {
+        tag = "v" + tag;
+    }
+
+    return "https://github.com/" + owner + "/" + repo + "/archive/refs/tags/" + tag + ".tar.gz";
+}
+
+// Download tarball for a package
+export fn download_tarball(owner: string, repo: string, version: string) {
+    let url = get_tarball_url(owner, repo, version);
+
+    let headers = [];
+    let token = get_token();
+    if (token != null && token.length > 0) {
+        headers.push("Authorization: Bearer " + token);
+    }
+    headers.push("User-Agent: hpm/1.0.0");
+
+    let response = get(url, headers);
+
+    if (!is_success(response.status_code)) {
+        throw "Failed to download tarball: HTTP " + response.status_code;
+    }
+
+    return response.body;
+}
+
+// Check if a repository exists
+export fn repo_exists(owner: string, repo: string): bool {
+    let url = "https://api.github.com/repos/" + owner + "/" + repo;
+    let headers = [];
+    let token = get_token();
+
+    if (token != null && token.length > 0) {
+        headers.push("Authorization: Bearer " + token);
+    }
+
+    headers.push("Accept: application/vnd.github.v3+json");
+    headers.push("User-Agent: hpm/1.0.0");
+
+    let response = get(url, headers);
+    return is_success(response.status_code);
+}
+
+// Get repository info
+export fn get_repo_info(owner: string, repo: string) {
+    let url = "https://api.github.com/repos/" + owner + "/" + repo;
+    return github_request(url);
+}

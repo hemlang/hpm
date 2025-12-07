@@ -1,0 +1,9 @@
+#!/bin/bash
+# hpm - Hemlock Package Manager wrapper script
+# This script runs hpm using the hemlock interpreter
+
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Run hpm with hemlock
+exec hemlock "$SCRIPT_DIR/src/main.hml" "$@"
