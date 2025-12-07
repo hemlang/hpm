@@ -1,9 +1,9 @@
 // hpm - GitHub API client
 
-import { get, is_success } from "@stdlib/http";
+import { get, get_binary, is_success } from "@stdlib/http";
 import { parse } from "@stdlib/json";
 import * as env from "@stdlib/env";
-import { exists, read_file } from "@stdlib/fs";
+import { exists, read_file, write_file } from "@stdlib/fs";
 import { sleep } from "@stdlib/time";
 
 // Retry configuration
@@ -218,53 +218,39 @@ export fn get_tarball_url(owner: string, repo: string, version: string): string 
     return "https://github.com/" + owner + "/" + repo + "/archive/refs/tags/" + tag + ".tar.gz";
 }
 
-// Download tarball for a package with retry logic
-export fn download_tarball(owner: string, repo: string, version: string) {
+// Download tarball for a package to a temp file
+// Returns the path to the downloaded file
+export fn download_tarball(owner: string, repo: string, version: string): string {
     let url = get_tarball_url(owner, repo, version);
+    let tmpfile = "/tmp/hpm_tarball_" + owner + "_" + repo + "_" + version + ".tar.gz";
 
+    // Build headers with auth if available
     let headers = [];
     let token = get_token();
     if (token != null && token.length > 0) {
         headers.push("Authorization: Bearer " + token);
     }
-    headers.push("User-Agent: hpm/1.0.0");
 
-    let retries = 0;
-    let backoff_ms = INITIAL_BACKOFF_MS;
+    // Use binary HTTP download (preserves null bytes)
+    let response = get_binary(url, headers);
 
-    while (retries <= MAX_RETRIES) {
-        let response = get(url, headers);
-
-        // Retry on rate limit (403)
-        if (response.status_code == 403) {
-            if (retries < MAX_RETRIES) {
-                retries = retries + 1;
-                sleep(backoff_ms);
-                backoff_ms = backoff_ms * 2;
-                continue;
-            }
-            throw "Failed to download tarball: rate limit exceeded after " + MAX_RETRIES + " retries";
-        }
-
-        // Retry on server errors (5xx) and network issues
-        if (response.status_code >= 500 || response.status_code == 0) {
-            if (retries < MAX_RETRIES) {
-                retries = retries + 1;
-                sleep(backoff_ms);
-                backoff_ms = backoff_ms * 2;
-                continue;
-            }
-            throw "Failed to download tarball: HTTP " + response.status_code + " after " + MAX_RETRIES + " retries";
-        }
-
-        if (!is_success(response.status_code)) {
-            throw "Failed to download tarball: HTTP " + response.status_code;
-        }
-
-        return response.body;
+    if (!is_success(response.status_code)) {
+        throw "Failed to download tarball: HTTP " + response.status_code;
     }
 
-    throw "Failed to download tarball after " + MAX_RETRIES + " retries";
+    if (response.body.length == 0) {
+        throw "Failed to download tarball: empty response";
+    }
+
+    // Write binary data to file
+    write_file(tmpfile, response.body);
+
+    // Verify file exists
+    if (!exists(tmpfile)) {
+        throw "Failed to download tarball: file not created";
+    }
+
+    return tmpfile;
 }
 
 // Check if a repository exists (with retry logic)

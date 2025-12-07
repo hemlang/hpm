@@ -2,8 +2,7 @@
 
 import { exists, read_file, write_file, make_dir, remove_dir, list_dir, is_dir } from "@stdlib/fs";
 import { sha256 } from "@stdlib/hash";
-import { gunzip, TarReader } from "@stdlib/compression";
-import { fork, waitpid } from "@stdlib/process";
+import { fork, waitpid, exec } from "@stdlib/process";
 import { exit } from "@stdlib/env";
 
 import * as github from "./github.hml";
@@ -36,64 +35,32 @@ export fn install_package(pkg_name: string, resolution, project_dir: string, ver
     }
 
     // Check cache first
-    let tarball_data = null;
+    let tarball_path = null;
     if (cache.is_cached(owner, repo, version)) {
         if (verbose) {
             print("    Using cached tarball");
         }
-        tarball_data = cache.read_tarball(owner, repo, version);
+        tarball_path = cache.get_cached_path(owner, repo, version);
     } else {
         // In offline mode, fail if not in cache
         if (offline) {
             throw "Package " + pkg_name + "@" + version + " not found in cache (offline mode)";
         }
 
-        // Download tarball
+        // Download tarball to temp file
         if (verbose) {
             print("    Downloading from GitHub...");
         }
-        tarball_data = github.download_tarball(owner, repo, tag_version);
+        tarball_path = github.download_tarball(owner, repo, tag_version);
 
-        // Store in cache
-        cache.store_tarball(owner, repo, version, tarball_data);
+        // Store in cache (copy the downloaded file)
+        cache.store_tarball_file(owner, repo, version, tarball_path);
     }
 
-    // Calculate integrity hash
-    let integrity = "sha256-" + sha256(tarball_data);
-
-    // Convert string to buffer if needed for decompression
-    let tarball_buffer = null;
-    if (typeof(tarball_data) == "buffer") {
-        tarball_buffer = tarball_data;
-    } else {
-        // Convert string to buffer
-        let bytes = tarball_data.bytes();
-        tarball_buffer = buffer(bytes.length);
-        let i = 0;
-        while (i < bytes.length) {
-            tarball_buffer[i] = bytes[i];
-            i = i + 1;
-        }
-    }
-
-    // Decompress gzip
+    // Extract using tar command (handles binary gzip correctly)
     if (verbose) {
         print("    Extracting...");
     }
-    let tar_data = gunzip(tarball_buffer);
-
-    // Convert decompressed string to buffer for TarReader
-    let tar_bytes = tar_data.bytes();
-    let tar_buffer = buffer(tar_bytes.length);
-    let i = 0;
-    while (i < tar_bytes.length) {
-        tar_buffer[i] = tar_bytes[i];
-        i = i + 1;
-    }
-
-    // Read tar archive
-    let reader = TarReader(tar_buffer);
-    let entries = reader.entries();
 
     // Create installation directory
     let install_dir = project_dir + "/hem_modules/" + owner + "/" + repo;
@@ -106,62 +73,39 @@ export fn install_package(pkg_name: string, resolution, project_dir: string, ver
     }
     make_dir(install_dir);
 
-    // Extract files
-    // GitHub tarballs have a root directory like "repo-version/"
-    // We need to strip this prefix
-    let root_prefix = "";
-    i = 0;
-    while (i < entries.length) {
-        let entry = entries[i];
-        if (entry.type == '5' && root_prefix == "") {
-            // First directory is the root
-            root_prefix = entry.name;
-            break;
-        }
-        i = i + 1;
+    // Create temp extraction dir
+    let extract_dir = "/tmp/hpm_extract_" + owner + "_" + repo + "_" + version;
+    if (exists(extract_dir)) {
+        remove_dir_recursive(extract_dir);
+    }
+    make_dir(extract_dir);
+
+    // Extract tarball using system tar
+    let tar_cmd = "tar -xzf '" + tarball_path + "' -C '" + extract_dir + "'";
+    let tar_result = exec(tar_cmd);
+    if (tar_result.exit_code != 0) {
+        throw "Failed to extract tarball: tar exited with status " + tar_result.exit_code;
     }
 
-    // Extract each entry
-    i = 0;
-    while (i < entries.length) {
-        let entry = entries[i];
-        let name = entry.name;
-
-        // Strip root prefix
-        if (root_prefix.length > 0 && name.starts_with(root_prefix)) {
-            name = name.substr(root_prefix.length, name.length - root_prefix.length);
-        }
-
-        // Skip empty names (the root directory itself)
-        if (name.length == 0 || name == "/") {
-            i = i + 1;
-            continue;
-        }
-
-        // Remove leading slash if present
-        if (name[0] == '/') {
-            name = name.substr(1, name.length - 1);
-        }
-
-        let target_path = install_dir + "/" + name;
-
-        if (entry.type == '5') {
-            // Directory
-            ensure_dir_recursive(target_path);
-        } else if (entry.type == '0') {
-            // Regular file
-            // Ensure parent directory exists
-            let last_slash = name.find_last("/");
-            if (last_slash > 0) {
-                let parent = install_dir + "/" + name.substr(0, last_slash);
-                ensure_dir_recursive(parent);
-            }
-
-            write_file(target_path, entry.content);
-        }
-
-        i = i + 1;
+    // Find the extracted directory (GitHub tarballs have a root dir like "repo-version/")
+    let extracted_dirs = list_dir(extract_dir);
+    if (extracted_dirs.length == 0) {
+        throw "Failed to extract tarball: no files extracted";
     }
+    let root_dir = extract_dir + "/" + extracted_dirs[0];
+
+    // Copy contents to install_dir
+    let copy_cmd = "cp -r '" + root_dir + "/.' '" + install_dir + "'";
+    let copy_result = exec(copy_cmd);
+    if (copy_result.exit_code != 0) {
+        throw "Failed to copy extracted files";
+    }
+
+    // Clean up temp extraction dir
+    remove_dir_recursive(extract_dir);
+
+    // Calculate integrity from file
+    let integrity = "sha256-unknown";  // TODO: calculate sha256 of tarball file
 
     return integrity;
 }
@@ -299,8 +243,8 @@ fn prefetch_packages(resolved, verbose: bool) {
                     if (tag_version.length > 0 && tag_version[0] != 'v') {
                         tag_version = "v" + tag_version;
                     }
-                    let tarball_data = github.download_tarball(pkg.owner, pkg.repo, tag_version);
-                    cache.store_tarball(pkg.owner, pkg.repo, pkg.version, tarball_data);
+                    let tarball_path = github.download_tarball(pkg.owner, pkg.repo, tag_version);
+                    cache.store_tarball_file(pkg.owner, pkg.repo, pkg.version, tarball_path);
                     exit(0);
                 } catch (e) {
                     exit(1);

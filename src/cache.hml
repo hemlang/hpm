@@ -3,6 +3,7 @@
 import { exists, read_file, write_file, make_dir, list_dir, remove_file, remove_dir, is_dir } from "@stdlib/fs";
 import * as env from "@stdlib/env";
 import { parse, stringify, pretty } from "@stdlib/json";
+import { exec } from "@stdlib/process";
 
 // Get cache directory path
 export fn get_cache_dir(): string {
@@ -86,7 +87,12 @@ export fn is_cached(owner: string, repo: string, version: string): bool {
     return exists(path);
 }
 
-// Store tarball in cache
+// Get path to cached tarball (alias for get_cached_tarball_path)
+export fn get_cached_path(owner: string, repo: string, version: string): string {
+    return get_cached_tarball_path(owner, repo, version);
+}
+
+// Store tarball in cache from data
 export fn store_tarball(owner: string, repo: string, version: string, data) {
     let cache_dir = get_cache_dir();
 
@@ -113,6 +119,34 @@ export fn store_tarball(owner: string, repo: string, version: string, data) {
     f.close();
 
     return path;
+}
+
+// Store tarball in cache from a file (copies the file)
+export fn store_tarball_file(owner: string, repo: string, version: string, src_path: string) {
+    let cache_dir = get_cache_dir();
+
+    // Remove 'v' prefix if present
+    let v = version;
+    if (v.length > 0 && v[0] == 'v') {
+        v = v.substr(1, v.length - 1);
+    }
+
+    // Ensure directory structure
+    ensure_dir(cache_dir + "/" + owner);
+    ensure_dir(cache_dir + "/" + owner + "/" + repo);
+
+    // Target path
+    let dst_path = cache_dir + "/" + owner + "/" + repo + "/" + v + ".tar.gz";
+
+    // Copy file using system cp
+    let cp_cmd = "cp '" + src_path + "' '" + dst_path + "'";
+    let result = exec(cp_cmd);
+    if (result.exit_code != 0) {
+        // Failed to copy - continue anyway, cache is optional
+        return null;
+    }
+
+    return dst_path;
 }
 
 // Read tarball from cache
