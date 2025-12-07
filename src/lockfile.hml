@@ -143,31 +143,31 @@ export fn needs_update(lockfile, manifest) {
 
 // Prune orphaned dependencies from lockfile
 // Returns the pruned lockfile and a list of removed package names
-export fn prune(lockfile, manifest) {
-    if (lockfile == null || lockfile.dependencies == null) {
-        return { lockfile: lockfile, removed: [] };
+export fn prune(lf, manifest) {
+    if (lf == null || lf.dependencies == null) {
+        return { result: lf, removed: [] };
     }
 
     // Declare loop variables once
-    let i = 0;
-    let keys = [];
+    let idx = 0;
+    let key_list = [];
 
     // Collect all root dependencies from manifest
     let roots = [];
     if (manifest.dependencies != null) {
-        keys = manifest.dependencies.keys();
-        i = 0;
-        while (i < keys.length) {
-            roots.push(keys[i]);
-            i = i + 1;
+        key_list = manifest.dependencies.keys();
+        idx = 0;
+        while (idx < key_list.length) {
+            roots.push(key_list[idx]);
+            idx = idx + 1;
         }
     }
     if (manifest.devDependencies != null) {
-        keys = manifest.devDependencies.keys();
-        i = 0;
-        while (i < keys.length) {
-            roots.push(keys[i]);
-            i = i + 1;
+        key_list = manifest.devDependencies.keys();
+        idx = 0;
+        while (idx < key_list.length) {
+            roots.push(key_list[idx]);
+            idx = idx + 1;
         }
     }
 
@@ -176,14 +176,14 @@ export fn prune(lockfile, manifest) {
     let queue = [];
 
     // Initialize queue with roots that exist in lockfile
-    i = 0;
-    while (i < roots.length) {
-        let root = roots[i];
-        if (lockfile.dependencies[root] != null) {
+    idx = 0;
+    while (idx < roots.length) {
+        let root = roots[idx];
+        if (lf.dependencies[root] != null) {
             queue.push(root);
             reachable[root] = true;
         }
-        i = i + 1;
+        idx = idx + 1;
     }
 
     // Process queue
@@ -191,24 +191,28 @@ export fn prune(lockfile, manifest) {
         let pkg_name = queue[0];
         // Remove first element
         let new_queue = [];
-        i = 1;
-        while (i < queue.length) {
-            new_queue.push(queue[i]);
-            i = i + 1;
+        idx = 1;
+        while (idx < queue.length) {
+            new_queue.push(queue[idx]);
+            idx = idx + 1;
         }
         queue = new_queue;
 
-        let entry = lockfile.dependencies[pkg_name];
-        if (entry != null && entry.dependencies != null) {
-            keys = entry.dependencies.keys();
-            i = 0;
-            while (i < keys.length) {
-                let dep = keys[i];
-                if (reachable[dep] != true && lockfile.dependencies[dep] != null) {
-                    reachable[dep] = true;
-                    queue.push(dep);
+        let entry = lf.dependencies[pkg_name];
+        if (entry != null) {
+            // Use bracket notation to avoid field access errors on missing fields
+            let entry_deps = entry["dependencies"];
+            if (entry_deps != null) {
+                key_list = entry_deps.keys();
+                idx = 0;
+                while (idx < key_list.length) {
+                    let dep = key_list[idx];
+                    if (reachable[dep] != true && lf.dependencies[dep] != null) {
+                        reachable[dep] = true;
+                        queue.push(dep);
+                    }
+                    idx = idx + 1;
                 }
-                i = i + 1;
             }
         }
     }
@@ -216,18 +220,18 @@ export fn prune(lockfile, manifest) {
     // Remove unreachable packages
     let removed = [];
     let new_deps = {};
-    keys = lockfile.dependencies.keys();
-    i = 0;
-    while (i < keys.length) {
-        let key = keys[i];
-        if (reachable[key] == true) {
-            new_deps[key] = lockfile.dependencies[key];
+    key_list = lf.dependencies.keys();
+    idx = 0;
+    while (idx < key_list.length) {
+        let k = key_list[idx];
+        if (reachable[k] == true) {
+            new_deps[k] = lf.dependencies[k];
         } else {
-            removed.push(key);
+            removed.push(k);
         }
-        i = i + 1;
+        idx = idx + 1;
     }
 
-    lockfile.dependencies = new_deps;
-    return { lockfile: lockfile, removed: removed };
+    lf.dependencies = new_deps;
+    return { result: lf, removed: removed };
 }

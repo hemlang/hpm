@@ -373,7 +373,7 @@ fn cmd_uninstall() {
     // Prune orphaned transitive dependencies
     if (lock != null) {
         let prune_result = lockfile.prune(lock, pkg);
-        lock = prune_result.lockfile;
+        lock = prune_result.result;
         let removed = prune_result.removed;
 
         // Remove orphaned packages from hem_modules

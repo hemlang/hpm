@@ -121,19 +121,19 @@ export fn run() {
     });
 
     test("prune keeps direct dependencies", fn() {
-        let lock2 = lockfile.create_empty();
-        lock2 = lockfile.set_locked(lock2, "owner/a", lockfile.create_entry("1.0.0", "", "", null));
-        lock2 = lockfile.set_locked(lock2, "owner/b", lockfile.create_entry("2.0.0", "", "", null));
+        let plf = lockfile.create_empty();
+        plf = lockfile.set_locked(plf, "owner/a", lockfile.create_entry("1.0.0", "", "", null));
+        plf = lockfile.set_locked(plf, "owner/b", lockfile.create_entry("2.0.0", "", "", null));
 
-        let deps2 = {};
-        deps2["owner/a"] = "^1.0.0";
-        deps2["owner/b"] = "^2.0.0";
-        let manifest2 = { dependencies: deps2, devDependencies: null };
+        let pdeps = {};
+        pdeps["owner/a"] = "^1.0.0";
+        pdeps["owner/b"] = "^2.0.0";
+        let pman = { dependencies: pdeps, devDependencies: null };
 
-        let prune_result2 = lockfile.prune(lock2, manifest2);
-        assert_eq(prune_result2.removed.length, 0, "nothing removed");
-        assert_not_null(lockfile.get_locked(prune_result2.lockfile, "owner/a"), "a still exists");
-        assert_not_null(lockfile.get_locked(prune_result2.lockfile, "owner/b"), "b still exists");
+        let pres = lockfile.prune(plf, pman);
+        assert_eq(pres.removed.length, 0, "nothing removed");
+        assert_not_null(lockfile.get_locked(pres.result, "owner/a"), "a still exists");
+        assert_not_null(lockfile.get_locked(pres.result, "owner/b"), "b still exists");
     });
 
     test("prune removes orphaned packages", fn() {
@@ -148,8 +148,8 @@ export fn run() {
         let prune_result3 = lockfile.prune(lock3, manifest3);
         assert_eq(prune_result3.removed.length, 1, "one removed");
         assert_eq(prune_result3.removed[0], "owner/orphan", "orphan was removed");
-        assert_not_null(lockfile.get_locked(prune_result3.lockfile, "owner/a"), "a still exists");
-        assert_null(lockfile.get_locked(prune_result3.lockfile, "owner/orphan"), "orphan removed");
+        assert_not_null(lockfile.get_locked(prune_result3.result, "owner/a"), "a still exists");
+        assert_null(lockfile.get_locked(prune_result3.result, "owner/orphan"), "orphan removed");
     });
 
     test("prune keeps transitive dependencies", fn() {
@@ -165,8 +165,8 @@ export fn run() {
 
         let prune_result4 = lockfile.prune(lock4, manifest4);
         assert_eq(prune_result4.removed.length, 0, "nothing removed");
-        assert_not_null(lockfile.get_locked(prune_result4.lockfile, "owner/a"), "a still exists");
-        assert_not_null(lockfile.get_locked(prune_result4.lockfile, "owner/trans"), "trans still exists");
+        assert_not_null(lockfile.get_locked(prune_result4.result, "owner/a"), "a still exists");
+        assert_not_null(lockfile.get_locked(prune_result4.result, "owner/trans"), "trans still exists");
     });
 
     test("prune removes orphaned transitive deps", fn() {
@@ -196,8 +196,8 @@ export fn run() {
 
         let prune_result6 = lockfile.prune(lock6, manifest6);
         assert_eq(prune_result6.removed.length, 0, "nothing removed");
-        assert_not_null(lockfile.get_locked(prune_result6.lockfile, "owner/prod"), "prod still exists");
-        assert_not_null(lockfile.get_locked(prune_result6.lockfile, "owner/dev"), "dev still exists");
+        assert_not_null(lockfile.get_locked(prune_result6.result, "owner/prod"), "prod still exists");
+        assert_not_null(lockfile.get_locked(prune_result6.result, "owner/dev"), "dev still exists");
     });
 
     test("prune handles deep transitive chain", fn() {
@@ -220,9 +220,9 @@ export fn run() {
 
         let prune_result7 = lockfile.prune(lock7, manifest7);
         assert_eq(prune_result7.removed.length, 0, "nothing removed");
-        assert_not_null(lockfile.get_locked(prune_result7.lockfile, "owner/a"), "a exists");
-        assert_not_null(lockfile.get_locked(prune_result7.lockfile, "owner/b"), "b exists");
-        assert_not_null(lockfile.get_locked(prune_result7.lockfile, "owner/c"), "c exists");
-        assert_not_null(lockfile.get_locked(prune_result7.lockfile, "owner/d"), "d exists");
+        assert_not_null(lockfile.get_locked(prune_result7.result, "owner/a"), "a exists");
+        assert_not_null(lockfile.get_locked(prune_result7.result, "owner/b"), "b exists");
+        assert_not_null(lockfile.get_locked(prune_result7.result, "owner/c"), "c exists");
+        assert_not_null(lockfile.get_locked(prune_result7.result, "owner/d"), "d exists");
     });
 }
