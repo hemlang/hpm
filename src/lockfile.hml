@@ -140,3 +140,98 @@ export fn needs_update(lockfile, manifest) {
 
     return false;
 }
+
+// Prune orphaned dependencies from lockfile
+// Returns the pruned lockfile and a list of removed package names
+export fn prune(lf, manifest) {
+    if (lf == null || lf.dependencies == null) {
+        return { result: lf, removed: [] };
+    }
+
+    // Declare loop variables once
+    let idx = 0;
+    let key_list = [];
+
+    // Collect all root dependencies from manifest
+    let roots = [];
+    if (manifest.dependencies != null) {
+        key_list = manifest.dependencies.keys();
+        idx = 0;
+        while (idx < key_list.length) {
+            roots.push(key_list[idx]);
+            idx = idx + 1;
+        }
+    }
+    if (manifest.devDependencies != null) {
+        key_list = manifest.devDependencies.keys();
+        idx = 0;
+        while (idx < key_list.length) {
+            roots.push(key_list[idx]);
+            idx = idx + 1;
+        }
+    }
+
+    // BFS to find all reachable packages
+    let reachable = {};
+    let queue = [];
+
+    // Initialize queue with roots that exist in lockfile
+    idx = 0;
+    while (idx < roots.length) {
+        let root = roots[idx];
+        if (lf.dependencies[root] != null) {
+            queue.push(root);
+            reachable[root] = true;
+        }
+        idx = idx + 1;
+    }
+
+    // Process queue
+    while (queue.length > 0) {
+        let pkg_name = queue[0];
+        // Remove first element
+        let new_queue = [];
+        idx = 1;
+        while (idx < queue.length) {
+            new_queue.push(queue[idx]);
+            idx = idx + 1;
+        }
+        queue = new_queue;
+
+        let entry = lf.dependencies[pkg_name];
+        if (entry != null) {
+            // Use bracket notation to avoid field access errors on missing fields
+            let entry_deps = entry["dependencies"];
+            if (entry_deps != null) {
+                key_list = entry_deps.keys();
+                idx = 0;
+                while (idx < key_list.length) {
+                    let dep = key_list[idx];
+                    if (reachable[dep] != true && lf.dependencies[dep] != null) {
+                        reachable[dep] = true;
+                        queue.push(dep);
+                    }
+                    idx = idx + 1;
+                }
+            }
+        }
+    }
+
+    // Remove unreachable packages
+    let removed = [];
+    let new_deps = {};
+    key_list = lf.dependencies.keys();
+    idx = 0;
+    while (idx < key_list.length) {
+        let k = key_list[idx];
+        if (reachable[k] == true) {
+            new_deps[k] = lf.dependencies[k];
+        } else {
+            removed.push(k);
+        }
+        idx = idx + 1;
+    }
+
+    lf.dependencies = new_deps;
+    return { result: lf, removed: removed };
+}
