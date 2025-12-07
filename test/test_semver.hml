@@ -1,0 +1,222 @@
+// Tests for semver module
+
+import { suite, test, assert, assert_eq, assert_true, assert_false, assert_null, assert_not_null } from "./framework.hml";
+import * as semver from "../src/semver.hml";
+
+export fn run() {
+    suite("semver.parse");
+
+    test("parses simple version", fn() {
+        let v = semver.parse("1.2.3");
+        assert_eq(v.major, 1, "major");
+        assert_eq(v.minor, 2, "minor");
+        assert_eq(v.patch, 3, "patch");
+        assert_eq(v.prerelease, "", "prerelease");
+    });
+
+    test("parses version with v prefix", fn() {
+        let v = semver.parse("v1.2.3");
+        assert_eq(v.major, 1, "major");
+        assert_eq(v.minor, 2, "minor");
+        assert_eq(v.patch, 3, "patch");
+    });
+
+    test("parses version with prerelease", fn() {
+        let v = semver.parse("1.0.0-alpha");
+        assert_eq(v.major, 1, "major");
+        assert_eq(v.minor, 0, "minor");
+        assert_eq(v.patch, 0, "patch");
+        assert_eq(v.prerelease, "alpha", "prerelease");
+    });
+
+    test("parses version with prerelease and build", fn() {
+        let v = semver.parse("1.0.0-beta.1+build.123");
+        assert_eq(v.major, 1, "major");
+        assert_eq(v.prerelease, "beta.1", "prerelease");
+        assert_eq(v.build, "build.123", "build");
+    });
+
+    test("returns null for empty string", fn() {
+        let v = semver.parse("");
+        assert_null(v, "should be null");
+    });
+
+    suite("semver.stringify");
+
+    test("stringifies simple version", fn() {
+        let v = { major: 1, minor: 2, patch: 3, prerelease: "", build: "" };
+        assert_eq(semver.stringify(v), "1.2.3", "stringify");
+    });
+
+    test("stringifies version with prerelease", fn() {
+        let v = { major: 1, minor: 0, patch: 0, prerelease: "alpha", build: "" };
+        assert_eq(semver.stringify(v), "1.0.0-alpha", "stringify");
+    });
+
+    suite("semver.compare");
+
+    test("equal versions", fn() {
+        let a = semver.parse("1.2.3");
+        let b = semver.parse("1.2.3");
+        assert_eq(semver.compare(a, b), 0, "should be equal");
+    });
+
+    test("major difference", fn() {
+        let a = semver.parse("2.0.0");
+        let b = semver.parse("1.0.0");
+        assert_eq(semver.compare(a, b), 1, "2.0.0 > 1.0.0");
+        assert_eq(semver.compare(b, a), -1, "1.0.0 < 2.0.0");
+    });
+
+    test("minor difference", fn() {
+        let a = semver.parse("1.2.0");
+        let b = semver.parse("1.1.0");
+        assert_eq(semver.compare(a, b), 1, "1.2.0 > 1.1.0");
+    });
+
+    test("patch difference", fn() {
+        let a = semver.parse("1.0.2");
+        let b = semver.parse("1.0.1");
+        assert_eq(semver.compare(a, b), 1, "1.0.2 > 1.0.1");
+    });
+
+    test("prerelease vs release", fn() {
+        let a = semver.parse("1.0.0");
+        let b = semver.parse("1.0.0-alpha");
+        assert_eq(semver.compare(a, b), 1, "release > prerelease");
+    });
+
+    suite("semver.gt/gte/lt/lte/eq");
+
+    test("gt", fn() {
+        let a = semver.parse("2.0.0");
+        let b = semver.parse("1.0.0");
+        assert_true(semver.gt(a, b), "2.0.0 > 1.0.0");
+        assert_false(semver.gt(b, a), "1.0.0 not > 2.0.0");
+    });
+
+    test("gte", fn() {
+        let a = semver.parse("1.0.0");
+        let b = semver.parse("1.0.0");
+        assert_true(semver.gte(a, b), "1.0.0 >= 1.0.0");
+    });
+
+    test("lt", fn() {
+        let a = semver.parse("1.0.0");
+        let b = semver.parse("2.0.0");
+        assert_true(semver.lt(a, b), "1.0.0 < 2.0.0");
+    });
+
+    test("eq", fn() {
+        let a = semver.parse("1.0.0");
+        let b = semver.parse("1.0.0");
+        assert_true(semver.eq(a, b), "1.0.0 == 1.0.0");
+    });
+
+    suite("semver.parse_constraint");
+
+    test("parses exact version", fn() {
+        let c = semver.parse_constraint("1.2.3");
+        assert_eq(c.type, "exact", "type");
+        assert_eq(c.version.major, 1, "major");
+    });
+
+    test("parses caret range", fn() {
+        let c = semver.parse_constraint("^1.2.3");
+        assert_eq(c.type, "caret", "type");
+        assert_eq(c.version.major, 1, "major");
+    });
+
+    test("parses tilde range", fn() {
+        let c = semver.parse_constraint("~1.2.3");
+        assert_eq(c.type, "tilde", "type");
+    });
+
+    test("parses gte", fn() {
+        let c = semver.parse_constraint(">=1.0.0");
+        assert_eq(c.type, "gte", "type");
+    });
+
+    test("parses any", fn() {
+        let c = semver.parse_constraint("*");
+        assert_eq(c.type, "any", "type");
+    });
+
+    suite("semver.satisfies");
+
+    test("any constraint", fn() {
+        let v = semver.parse("1.2.3");
+        let c = semver.parse_constraint("*");
+        assert_true(semver.satisfies(v, c), "any satisfies");
+    });
+
+    test("exact constraint matches", fn() {
+        let v = semver.parse("1.2.3");
+        let c = semver.parse_constraint("1.2.3");
+        assert_true(semver.satisfies(v, c), "exact match");
+    });
+
+    test("exact constraint fails", fn() {
+        let v = semver.parse("1.2.4");
+        let c = semver.parse_constraint("1.2.3");
+        assert_false(semver.satisfies(v, c), "exact mismatch");
+    });
+
+    test("caret range basic", fn() {
+        let c = semver.parse_constraint("^1.2.3");
+
+        // Should satisfy
+        assert_true(semver.satisfies(semver.parse("1.2.3"), c), "1.2.3");
+        assert_true(semver.satisfies(semver.parse("1.2.4"), c), "1.2.4");
+        assert_true(semver.satisfies(semver.parse("1.9.0"), c), "1.9.0");
+
+        // Should not satisfy
+        assert_false(semver.satisfies(semver.parse("1.2.2"), c), "1.2.2 too low");
+        assert_false(semver.satisfies(semver.parse("2.0.0"), c), "2.0.0 too high");
+    });
+
+    test("tilde range basic", fn() {
+        let c = semver.parse_constraint("~1.2.3");
+
+        // Should satisfy
+        assert_true(semver.satisfies(semver.parse("1.2.3"), c), "1.2.3");
+        assert_true(semver.satisfies(semver.parse("1.2.9"), c), "1.2.9");
+
+        // Should not satisfy
+        assert_false(semver.satisfies(semver.parse("1.3.0"), c), "1.3.0 too high");
+    });
+
+    test("gte constraint", fn() {
+        let c = semver.parse_constraint(">=1.0.0");
+        assert_true(semver.satisfies(semver.parse("1.0.0"), c), "1.0.0");
+        assert_true(semver.satisfies(semver.parse("2.0.0"), c), "2.0.0");
+        assert_false(semver.satisfies(semver.parse("0.9.0"), c), "0.9.0");
+    });
+
+    suite("semver.max_satisfying");
+
+    test("finds max version", fn() {
+        let versions = ["v1.0.0", "v1.1.0", "v1.2.0", "v2.0.0"];
+        let c = semver.parse_constraint("^1.0.0");
+        let max = semver.max_satisfying(versions, c);
+        assert_eq(max, "v1.2.0", "max satisfying");
+    });
+
+    test("returns null when none satisfy", fn() {
+        let versions = ["v2.0.0", "v3.0.0"];
+        let c = semver.parse_constraint("^1.0.0");
+        let max = semver.max_satisfying(versions, c);
+        assert_null(max, "none satisfy");
+    });
+
+    suite("semver.sort");
+
+    test("sorts versions ascending", fn() {
+        let versions = ["v1.2.0", "v1.0.0", "v2.0.0", "v1.1.0"];
+        let sorted = semver.sort(versions);
+        assert_eq(sorted[0], "v1.0.0", "first");
+        assert_eq(sorted[1], "v1.1.0", "second");
+        assert_eq(sorted[2], "v1.2.0", "third");
+        assert_eq(sorted[3], "v2.0.0", "fourth");
+    });
+}

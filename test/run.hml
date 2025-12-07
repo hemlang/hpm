@@ -1,0 +1,24 @@
+// hpm test runner
+// Runs all test suites and reports results
+
+import { exit } from "@stdlib/env";
+import { summary } from "./framework.hml";
+
+// Import test modules
+import * as test_semver from "./test_semver.hml";
+import * as test_manifest from "./test_manifest.hml";
+import * as test_lockfile from "./test_lockfile.hml";
+import * as test_cache from "./test_cache.hml";
+
+print("hpm Test Suite");
+print("==============");
+
+// Run all test suites
+test_semver.run();
+test_manifest.run();
+test_lockfile.run();
+test_cache.run();
+
+// Print summary and exit with appropriate code
+let exit_code = summary();
+exit(exit_code);

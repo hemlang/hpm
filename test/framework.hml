@@ -1,0 +1,118 @@
+// Simple test framework for hpm
+
+let tests_run = 0;
+let tests_passed = 0;
+let tests_failed = 0;
+let current_suite = "";
+
+// Start a test suite
+export fn suite(name: string) {
+    current_suite = name;
+    print("");
+    print("=== " + name + " ===");
+}
+
+// Run a single test
+export fn test(name: string, test_fn) {
+    tests_run = tests_run + 1;
+    let full_name = name;
+    if (current_suite.length > 0) {
+        full_name = current_suite + " > " + name;
+    }
+
+    try {
+        test_fn();
+        tests_passed = tests_passed + 1;
+        print("  [PASS] " + name);
+    } catch (e) {
+        tests_failed = tests_failed + 1;
+        print("  [FAIL] " + name);
+        print("         " + e);
+    }
+}
+
+// Assertion helpers
+export fn assert(condition: bool, message: string) {
+    if (!condition) {
+        throw "Assertion failed: " + message;
+    }
+}
+
+export fn assert_eq(actual, expected, message: string) {
+    if (actual != expected) {
+        throw "Assertion failed: " + message + " (expected " + expected + ", got " + actual + ")";
+    }
+}
+
+export fn assert_neq(actual, expected, message: string) {
+    if (actual == expected) {
+        throw "Assertion failed: " + message + " (expected not " + expected + ")";
+    }
+}
+
+export fn assert_null(value, message: string) {
+    if (value != null) {
+        throw "Assertion failed: " + message + " (expected null, got " + value + ")";
+    }
+}
+
+export fn assert_not_null(value, message: string) {
+    if (value == null) {
+        throw "Assertion failed: " + message + " (expected non-null value)";
+    }
+}
+
+export fn assert_true(value, message: string) {
+    if (value != true) {
+        throw "Assertion failed: " + message + " (expected true)";
+    }
+}
+
+export fn assert_false(value, message: string) {
+    if (value != false) {
+        throw "Assertion failed: " + message + " (expected false)";
+    }
+}
+
+export fn assert_throws(test_fn, message: string) {
+    let threw = false;
+    try {
+        test_fn();
+    } catch (e) {
+        threw = true;
+    }
+    if (!threw) {
+        throw "Assertion failed: " + message + " (expected exception)";
+    }
+}
+
+// Print summary and return exit code
+export fn summary(): i32 {
+    print("");
+    print("================================");
+    print("Tests: " + tests_run + " | Passed: " + tests_passed + " | Failed: " + tests_failed);
+    print("================================");
+
+    if (tests_failed > 0) {
+        print("");
+        print("FAILED");
+        return 1;
+    }
+
+    print("");
+    print("ALL TESTS PASSED");
+    return 0;
+}
+
+// Get counts for external use
+export fn get_passed(): i32 {
+    return tests_passed;
+}
+
+export fn get_failed(): i32 {
+    return tests_failed;
+}
+
+export fn get_total(): i32 {
+    return tests_run;
+}

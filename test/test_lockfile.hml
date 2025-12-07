@@ -1,0 +1,115 @@
+// Tests for lockfile module
+
+import { suite, test, assert, assert_eq, assert_true, assert_false, assert_null, assert_not_null } from "./framework.hml";
+import * as lockfile from "../src/lockfile.hml";
+
+export fn run() {
+    suite("lockfile.create_empty");
+
+    test("creates empty lockfile", fn() {
+        let lock = lockfile.create_empty();
+        assert_eq(lock.lockVersion, 1, "lockVersion");
+        assert_eq(lock.hemlock, "1.0.0", "hemlock");
+        assert_not_null(lock.dependencies, "dependencies");
+    });
+
+    suite("lockfile.create_entry");
+
+    test("creates entry with all fields", fn() {
+        let deps = {};
+        deps["other/pkg"] = "^1.0.0";
+        let entry = lockfile.create_entry(
+            "1.2.3",
+            "https://github.com/owner/repo/archive/v1.2.3.tar.gz",
+            "sha256-abc123",
+            deps
+        );
+
+        assert_eq(entry.version, "1.2.3", "version");
+        assert_eq(entry.resolved, "https://github.com/owner/repo/archive/v1.2.3.tar.gz", "resolved");
+        assert_eq(entry.integrity, "sha256-abc123", "integrity");
+        assert_not_null(entry.dependencies, "dependencies");
+    });
+
+    test("creates entry without deps", fn() {
+        let entry = lockfile.create_entry("1.0.0", "url", "hash", null);
+        assert_eq(entry.version, "1.0.0", "version");
+        // When no deps passed, the dependencies field is not set
+    });
+
+    suite("lockfile.get_locked/set_locked");
+
+    test("gets and sets locked entry", fn() {
+        let lock = lockfile.create_empty();
+        let entry = lockfile.create_entry("1.0.0", "url", "hash", null);
+
+        lock = lockfile.set_locked(lock, "owner/pkg", entry);
+        let retrieved = lockfile.get_locked(lock, "owner/pkg");
+
+        assert_not_null(retrieved, "entry exists");
+        assert_eq(retrieved.version, "1.0.0", "version matches");
+    });
+
+    test("returns null for missing entry", fn() {
+        let lock = lockfile.create_empty();
+        let entry = lockfile.get_locked(lock, "nonexistent/pkg");
+        assert_null(entry, "should be null");
+    });
+
+    suite("lockfile.remove_locked");
+
+    test("removes entry", fn() {
+        let lock = lockfile.create_empty();
+        let entry = lockfile.create_entry("1.0.0", "url", "hash", null);
+        lock = lockfile.set_locked(lock, "owner/pkg", entry);
+
+        lock = lockfile.remove_locked(lock, "owner/pkg");
+        let retrieved = lockfile.get_locked(lock, "owner/pkg");
+
+        assert_null(retrieved, "entry removed");
+    });
+
+    suite("lockfile.get_locked_names");
+
+    test("returns all names", fn() {
+        let lock = lockfile.create_empty();
+        lock = lockfile.set_locked(lock, "owner/a", lockfile.create_entry("1.0.0", "", "", null));
+        lock = lockfile.set_locked(lock, "owner/b", lockfile.create_entry("2.0.0", "", "", null));
+
+        let names = lockfile.get_locked_names(lock);
+        assert_eq(names.length, 2, "two entries");
+    });
+
+    test("returns empty for new lockfile", fn() {
+        let lock = lockfile.create_empty();
+        let names = lockfile.get_locked_names(lock);
+        assert_eq(names.length, 0, "no entries");
+    });
+
+    suite("lockfile.needs_update");
+
+    test("needs update when no lockfile", fn() {
+        let deps = {};
+        deps["owner/pkg"] = "^1.0.0";
+        let manifest = { dependencies: deps };
+        assert_true(lockfile.needs_update(null, manifest), "needs update");
+    });
+
+    test("needs update when dep missing", fn() {
+        let lock = lockfile.create_empty();
+        let deps = {};
+        deps["owner/pkg"] = "^1.0.0";
+        let manifest = { dependencies: deps };
+        assert_true(lockfile.needs_update(lock, manifest), "needs update");
+    });
+
+    test("no update when all deps locked", fn() {
+        let lock = lockfile.create_empty();
+        lock = lockfile.set_locked(lock, "owner/pkg", lockfile.create_entry("1.0.0", "", "", null));
+
+        let deps = {};
+        deps["owner/pkg"] = "^1.0.0";
+        let manifest = { dependencies: deps, devDependencies: null };
+        assert_false(lockfile.needs_update(lock, manifest), "no update needed");
+    });
+}

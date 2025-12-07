@@ -86,15 +86,15 @@ export fn validate(manifest) {
 
     // Validate devDependencies if present
     if (manifest.devDependencies != null) {
-        let dep_keys = manifest.devDependencies.keys();
-        let i = 0;
-        while (i < dep_keys.length) {
-            let dep = dep_keys[i];
-            let slash_pos = dep.find("/");
-            if (slash_pos < 1 || slash_pos >= dep.length - 1) {
-                errors.push("Invalid devDependency name: " + dep + " (must be 'owner/repo')");
+        let dev_dep_keys = manifest.devDependencies.keys();
+        let j = 0;
+        while (j < dev_dep_keys.length) {
+            let dev_dep = dev_dep_keys[j];
+            let dev_slash_pos = dev_dep.find("/");
+            if (dev_slash_pos < 1 || dev_slash_pos >= dev_dep.length - 1) {
+                errors.push("Invalid devDependency name: " + dev_dep + " (must be 'owner/repo')");
             }
-            i = i + 1;
+            j = j + 1;
         }
     }
 
@@ -109,22 +109,22 @@ export fn get_all_dependencies(manifest, include_dev: bool) {
     let deps = {};
 
     if (manifest.dependencies != null) {
-        let keys = manifest.dependencies.keys();
+        let dep_keys = manifest.dependencies.keys();
         let i = 0;
-        while (i < keys.length) {
-            let key = keys[i];
+        while (i < dep_keys.length) {
+            let key = dep_keys[i];
             deps[key] = manifest.dependencies[key];
             i = i + 1;
         }
     }
 
     if (include_dev && manifest.devDependencies != null) {
-        let keys = manifest.devDependencies.keys();
-        let i = 0;
-        while (i < keys.length) {
-            let key = keys[i];
-            deps[key] = manifest.devDependencies[key];
-            i = i + 1;
+        let dev_keys = manifest.devDependencies.keys();
+        let j = 0;
+        while (j < dev_keys.length) {
+            let dev_key = dev_keys[j];
+            deps[dev_key] = manifest.devDependencies[dev_key];
+            j = j + 1;
         }
     }
 

@@ -1,0 +1,131 @@
+// Tests for manifest module
+
+import { suite, test, assert, assert_eq, assert_true, assert_false, assert_null, assert_not_null } from "./framework.hml";
+import * as manifest from "../src/manifest.hml";
+
+export fn run() {
+    suite("manifest.create_default");
+
+    test("creates default manifest", fn() {
+        let m = manifest.create_default("test/package", "1.0.0");
+        assert_eq(m.name, "test/package", "name");
+        assert_eq(m.version, "1.0.0", "version");
+        assert_eq(m.license, "MIT", "license");
+        assert_eq(m.main, "src/index.hml", "main");
+        assert_not_null(m.dependencies, "dependencies");
+        assert_not_null(m.devDependencies, "devDependencies");
+    });
+
+    suite("manifest.validate");
+
+    test("valid manifest passes", fn() {
+        let m = manifest.create_default("owner/repo", "1.0.0");
+        let result = manifest.validate(m);
+        assert_true(result.valid, "should be valid");
+        assert_eq(result.errors.length, 0, "no errors");
+    });
+
+    test("missing name fails", fn() {
+        let m = { name: "", version: "1.0.0", dependencies: null, devDependencies: null };
+        let result = manifest.validate(m);
+        assert_false(result.valid, "should be invalid");
+        assert_true(result.errors.length > 0, "has errors");
+    });
+
+    test("missing version fails", fn() {
+        let m = { name: "owner/repo", version: "", dependencies: null, devDependencies: null };
+        let result = manifest.validate(m);
+        assert_false(result.valid, "should be invalid");
+    });
+
+    test("invalid name format fails", fn() {
+        let m = { name: "invalid", version: "1.0.0", dependencies: null, devDependencies: null };
+        let result = manifest.validate(m);
+        assert_false(result.valid, "should be invalid");
+    });
+
+    test("reserved name fails", fn() {
+        let m = { name: "stdlib/something", version: "1.0.0", dependencies: null, devDependencies: null };
+        let result = manifest.validate(m);
+        assert_false(result.valid, "should be invalid");
+    });
+
+    suite("manifest.parse_specifier");
+
+    test("parses name only", fn() {
+        let spec = manifest.parse_specifier("owner/repo");
+        assert_eq(spec.name, "owner/repo", "name");
+        assert_eq(spec.version, "*", "version defaults to *");
+    });
+
+    test("parses name with version", fn() {
+        let spec = manifest.parse_specifier("owner/repo@^1.0.0");
+        assert_eq(spec.name, "owner/repo", "name");
+        assert_eq(spec.version, "^1.0.0", "version");
+    });
+
+    test("parses exact version", fn() {
+        let spec = manifest.parse_specifier("owner/repo@1.2.3");
+        assert_eq(spec.name, "owner/repo", "name");
+        assert_eq(spec.version, "1.2.3", "version");
+    });
+
+    suite("manifest.split_name");
+
+    test("splits valid name", fn() {
+        let parts = manifest.split_name("owner/repo");
+        assert_eq(parts.owner, "owner", "owner");
+        assert_eq(parts.repo, "repo", "repo");
+    });
+
+    test("returns null for invalid name", fn() {
+        let parts = manifest.split_name("invalid");
+        assert_null(parts, "should be null");
+    });
+
+    suite("manifest.add_dependency");
+
+    test("adds regular dependency", fn() {
+        let m = manifest.create_default("test/pkg", "1.0.0");
+        m = manifest.add_dependency(m, "owner/dep", "^1.0.0", false);
+        assert_eq(m.dependencies["owner/dep"], "^1.0.0", "dependency added");
+    });
+
+    test("adds dev dependency", fn() {
+        let m = manifest.create_default("test/pkg", "1.0.0");
+        m = manifest.add_dependency(m, "owner/dev", "^1.0.0", true);
+        assert_eq(m.devDependencies["owner/dev"], "^1.0.0", "dev dependency added");
+    });
+
+    suite("manifest.remove_dependency");
+
+    test("removes dependency", fn() {
+        let m = manifest.create_default("test/pkg", "1.0.0");
+        m.dependencies["owner/dep"] = "^1.0.0";
+        m = manifest.remove_dependency(m, "owner/dep");
+        assert_null(m.dependencies["owner/dep"], "dependency removed");
+    });
+
+    suite("manifest.get_all_dependencies");
+
+    test("gets only regular deps", fn() {
+        let m = manifest.create_default("test/pkg", "1.0.0");
+        m.dependencies["owner/a"] = "^1.0.0";
+        m.devDependencies["owner/b"] = "^1.0.0";
+
+        let deps = manifest.get_all_dependencies(m, false);
+        let keys = deps.keys();
+        assert_eq(keys.length, 1, "only regular deps");
+        assert_eq(keys[0], "owner/a", "correct dep");
+    });
+
+    test("gets all deps with dev", fn() {
+        let m = manifest.create_default("test/pkg", "1.0.0");
+        m.dependencies["owner/a"] = "^1.0.0";
+        m.devDependencies["owner/b"] = "^1.0.0";
+
+        let deps = manifest.get_all_dependencies(m, true);
+        let keys = deps.keys();
+        assert_eq(keys.length, 2, "all deps");
+    });
+}

@@ -1,0 +1,33 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout hpm
+        uses: actions/checkout@v4
+
+      - name: Checkout hemlock
+        uses: actions/checkout@v4
+        with:
+          repository: hemlang/hemlock
+          path: hemlock
+
+      - name: Build hemlock
+        run: |
+          cd hemlock
+          make
+          sudo make install
+
+      - name: Verify hemlock installation
+        run: hemlock --version
+
+      - name: Run tests
+        run: hemlock test/run.hml

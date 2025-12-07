@@ -1,0 +1,62 @@
+// Tests for cache module
+
+import { suite, test, assert, assert_eq, assert_true, assert_false, assert_not_null } from "./framework.hml";
+import { getenv } from "@stdlib/env";
+import * as cache from "../src/cache.hml";
+
+export fn run() {
+    suite("cache.get_cache_dir");
+
+    test("returns path", fn() {
+        let dir = cache.get_cache_dir();
+        assert_not_null(dir, "should return a path");
+        assert_true(dir.length > 0, "path not empty");
+    });
+
+    test("respects HOME", fn() {
+        let home = getenv("HOME");
+        if (home != null) {
+            let dir = cache.get_cache_dir();
+            assert_true(dir.starts_with(home), "should be under HOME");
+        }
+    });
+
+    suite("cache.get_config_dir");
+
+    test("returns path", fn() {
+        let dir = cache.get_config_dir();
+        assert_not_null(dir, "should return a path");
+        assert_true(dir.ends_with(".hpm"), "should end with .hpm");
+    });
+
+    suite("cache.get_cached_tarball_path");
+
+    test("builds correct path", fn() {
+        let path = cache.get_cached_tarball_path("owner", "repo", "1.0.0");
+        assert_true(path.contains("owner"), "contains owner");
+        assert_true(path.contains("repo"), "contains repo");
+        assert_true(path.contains("1.0.0"), "contains version");
+        assert_true(path.ends_with(".tar.gz"), "ends with .tar.gz");
+    });
+
+    test("strips v prefix", fn() {
+        let path = cache.get_cached_tarball_path("owner", "repo", "v1.0.0");
+        assert_false(path.contains("v1.0.0"), "v prefix stripped");
+        assert_true(path.contains("1.0.0"), "version without v");
+    });
+
+    suite("cache.list_cached");
+
+    test("returns array", fn() {
+        let packages = cache.list_cached();
+        assert_not_null(packages, "should return array");
+        // Note: actual content depends on cache state
+    });
+
+    suite("cache.get_cache_size");
+
+    test("returns number", fn() {
+        let size = cache.get_cache_size();
+        assert_true(size >= 0, "size >= 0");
+    });
+}
