@@ -4,6 +4,11 @@ import { get, is_success } from "@stdlib/http";
 import { parse } from "@stdlib/json";
 import { getenv } from "@stdlib/env";
 import { exists, read_file } from "@stdlib/fs";
+import { sleep } from "@stdlib/time";
+
+// Retry configuration
+let MAX_RETRIES = 4;
+let INITIAL_BACKOFF_MS = 1000;  // 1 second
 
 // Get GitHub token from environment or config
 export fn get_token() {
@@ -33,7 +38,7 @@ export fn get_token() {
     return null;
 }
 
-// Make an authenticated GitHub API request
+// Make an authenticated GitHub API request with retry logic
 fn github_request(url: string) {
     let headers = [];
     let token = get_token();
@@ -45,22 +50,46 @@ fn github_request(url: string) {
     headers.push("Accept: application/vnd.github.v3+json");
     headers.push("User-Agent: hpm/1.0.0");
 
-    let response = get(url, headers);
+    let retries = 0;
+    let backoff_ms = INITIAL_BACKOFF_MS;
 
-    if (response.status_code == 403) {
-        // Check for rate limit
-        throw "GitHub API rate limit exceeded. Set GITHUB_TOKEN to increase limit.";
+    while (retries <= MAX_RETRIES) {
+        let response = get(url, headers);
+
+        if (response.status_code == 403) {
+            // Rate limit - retry with exponential backoff
+            if (retries < MAX_RETRIES) {
+                retries = retries + 1;
+                sleep(backoff_ms);
+                backoff_ms = backoff_ms * 2;  // Exponential backoff: 1s, 2s, 4s, 8s
+                continue;
+            }
+            throw "GitHub API rate limit exceeded after " + MAX_RETRIES + " retries. Set GITHUB_TOKEN to increase limit.";
+        }
+
+        if (response.status_code == 404) {
+            return null;
+        }
+
+        // Retry on server errors (5xx) and network issues
+        if (response.status_code >= 500 || response.status_code == 0) {
+            if (retries < MAX_RETRIES) {
+                retries = retries + 1;
+                sleep(backoff_ms);
+                backoff_ms = backoff_ms * 2;
+                continue;
+            }
+            throw "GitHub API error: HTTP " + response.status_code + " after " + MAX_RETRIES + " retries";
+        }
+
+        if (!is_success(response.status_code)) {
+            throw "GitHub API error: HTTP " + response.status_code;
+        }
+
+        return parse(response.body);
     }
 
-    if (response.status_code == 404) {
-        return null;
-    }
-
-    if (!is_success(response.status_code)) {
-        throw "GitHub API error: HTTP " + response.status_code;
-    }
-
-    return parse(response.body);
+    throw "GitHub API request failed after " + MAX_RETRIES + " retries";
 }
 
 // Get list of tags (versions) for a repository
@@ -189,7 +218,7 @@ export fn get_tarball_url(owner: string, repo: string, version: string): string 
     return "https://github.com/" + owner + "/" + repo + "/archive/refs/tags/" + tag + ".tar.gz";
 }
 
-// Download tarball for a package
+// Download tarball for a package with retry logic
 export fn download_tarball(owner: string, repo: string, version: string) {
     let url = get_tarball_url(owner, repo, version);
 
@@ -200,16 +229,45 @@ export fn download_tarball(owner: string, repo: string, version: string) {
     }
     headers.push("User-Agent: hpm/1.0.0");
 
-    let response = get(url, headers);
+    let retries = 0;
+    let backoff_ms = INITIAL_BACKOFF_MS;
 
-    if (!is_success(response.status_code)) {
-        throw "Failed to download tarball: HTTP " + response.status_code;
+    while (retries <= MAX_RETRIES) {
+        let response = get(url, headers);
+
+        // Retry on rate limit (403)
+        if (response.status_code == 403) {
+            if (retries < MAX_RETRIES) {
+                retries = retries + 1;
+                sleep(backoff_ms);
+                backoff_ms = backoff_ms * 2;
+                continue;
+            }
+            throw "Failed to download tarball: rate limit exceeded after " + MAX_RETRIES + " retries";
+        }
+
+        // Retry on server errors (5xx) and network issues
+        if (response.status_code >= 500 || response.status_code == 0) {
+            if (retries < MAX_RETRIES) {
+                retries = retries + 1;
+                sleep(backoff_ms);
+                backoff_ms = backoff_ms * 2;
+                continue;
+            }
+            throw "Failed to download tarball: HTTP " + response.status_code + " after " + MAX_RETRIES + " retries";
+        }
+
+        if (!is_success(response.status_code)) {
+            throw "Failed to download tarball: HTTP " + response.status_code;
+        }
+
+        return response.body;
     }
 
-    return response.body;
+    throw "Failed to download tarball after " + MAX_RETRIES + " retries";
 }
 
-// Check if a repository exists
+// Check if a repository exists (with retry logic)
 export fn repo_exists(owner: string, repo: string): bool {
     let url = "https://api.github.com/repos/" + owner + "/" + repo;
     let headers = [];
@@ -222,8 +280,26 @@ export fn repo_exists(owner: string, repo: string): bool {
     headers.push("Accept: application/vnd.github.v3+json");
     headers.push("User-Agent: hpm/1.0.0");
 
-    let response = get(url, headers);
-    return is_success(response.status_code);
+    let retries = 0;
+    let backoff_ms = INITIAL_BACKOFF_MS;
+
+    while (retries <= MAX_RETRIES) {
+        let response = get(url, headers);
+
+        // Retry on rate limit or server errors
+        if (response.status_code == 403 || response.status_code >= 500 || response.status_code == 0) {
+            if (retries < MAX_RETRIES) {
+                retries = retries + 1;
+                sleep(backoff_ms);
+                backoff_ms = backoff_ms * 2;
+                continue;
+            }
+        }
+
+        return is_success(response.status_code);
+    }
+
+    return false;
 }
 
 // Get repository info

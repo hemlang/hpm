@@ -140,3 +140,90 @@ export fn needs_update(lockfile, manifest) {
 
     return false;
 }
+
+// Prune orphaned dependencies from lockfile
+// Returns the pruned lockfile and a list of removed package names
+export fn prune(lockfile, manifest) {
+    if (lockfile == null || lockfile.dependencies == null) {
+        return { lockfile: lockfile, removed: [] };
+    }
+
+    // Collect all root dependencies from manifest
+    let roots = [];
+    if (manifest.dependencies != null) {
+        let keys = manifest.dependencies.keys();
+        let i = 0;
+        while (i < keys.length) {
+            roots.push(keys[i]);
+            i = i + 1;
+        }
+    }
+    if (manifest.devDependencies != null) {
+        let keys = manifest.devDependencies.keys();
+        let i = 0;
+        while (i < keys.length) {
+            roots.push(keys[i]);
+            i = i + 1;
+        }
+    }
+
+    // BFS to find all reachable packages
+    let reachable = {};
+    let queue = [];
+
+    // Initialize queue with roots that exist in lockfile
+    let i = 0;
+    while (i < roots.length) {
+        let root = roots[i];
+        if (lockfile.dependencies[root] != null) {
+            queue.push(root);
+            reachable[root] = true;
+        }
+        i = i + 1;
+    }
+
+    // Process queue
+    while (queue.length > 0) {
+        let pkg_name = queue[0];
+        // Remove first element
+        let new_queue = [];
+        i = 1;
+        while (i < queue.length) {
+            new_queue.push(queue[i]);
+            i = i + 1;
+        }
+        queue = new_queue;
+
+        let entry = lockfile.dependencies[pkg_name];
+        if (entry != null && entry.dependencies != null) {
+            let dep_keys = entry.dependencies.keys();
+            i = 0;
+            while (i < dep_keys.length) {
+                let dep = dep_keys[i];
+                if (reachable[dep] != true && lockfile.dependencies[dep] != null) {
+                    reachable[dep] = true;
+                    queue.push(dep);
+                }
+                i = i + 1;
+            }
+        }
+    }
+
+    // Remove unreachable packages
+    let removed = [];
+    let new_deps = {};
+    let all_keys = lockfile.dependencies.keys();
+    i = 0;
+    while (i < all_keys.length) {
+        let key = all_keys[i];
+        if (reachable[key] == true) {
+            new_deps[key] = lockfile.dependencies[key];
+        } else {
+            removed.push(key);
+        }
+        i = i + 1;
+    }
+
+    lockfile.dependencies = new_deps;
+    return { lockfile: lockfile, removed: removed };
+}

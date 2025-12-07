@@ -3,13 +3,19 @@
 import { exists, read_file, write_file, make_dir, remove_dir, list_dir, is_dir } from "@stdlib/fs";
 import { sha256 } from "@stdlib/hash";
 import { gunzip, TarReader } from "@stdlib/compression";
+import { fork, waitpid } from "@stdlib/process";
+import { exit } from "@stdlib/env";
 
 import * as github from "./github.hml";
 import * as cache from "./cache.hml";
 import * as manifest from "./manifest.hml";
 
+// Maximum number of parallel downloads
+let MAX_PARALLEL_DOWNLOADS = 4;
+
 // Install a resolved package to hem_modules
-export fn install_package(pkg_name: string, resolution, project_dir: string, verbose: bool) {
+// Set offline=true to install only from cache (no network requests)
+export fn install_package(pkg_name: string, resolution, project_dir: string, verbose: bool, offline: bool) {
     let parts = manifest.split_name(pkg_name);
     if (parts == null) {
         throw "Invalid package name: " + pkg_name;
@@ -37,6 +43,11 @@ export fn install_package(pkg_name: string, resolution, project_dir: string, ver
         }
         tarball_data = cache.read_tarball(owner, repo, version);
     } else {
+        // In offline mode, fail if not in cache
+        if (offline) {
+            throw "Package " + pkg_name + "@" + version + " not found in cache (offline mode)";
+        }
+
         // Download tarball
         if (verbose) {
             print("    Downloading from GitHub...");
@@ -229,8 +240,101 @@ fn remove_dir_recursive(path: string) {
 // Import remove_file from fs
 import { remove_file } from "@stdlib/fs";
 
+// Prefetch packages to cache in parallel (download only, no extraction)
+fn prefetch_packages(resolved, verbose: bool) {
+    let keys = resolved.keys();
+    let to_download = [];
+
+    // Build list of packages not in cache
+    let i = 0;
+    while (i < keys.length) {
+        let pkg_name = keys[i];
+        let resolution = resolved.get(pkg_name);
+        let parts = manifest.split_name(pkg_name);
+
+        if (parts != null) {
+            let version = resolution.version;
+            if (!cache.is_cached(parts.owner, parts.repo, version)) {
+                to_download.push({
+                    name: pkg_name,
+                    owner: parts.owner,
+                    repo: parts.repo,
+                    version: version
+                });
+            }
+        }
+        i = i + 1;
+    }
+
+    if (to_download.length == 0) {
+        if (verbose) {
+            print("  All packages in cache");
+        }
+        return;
+    }
+
+    if (verbose) {
+        print("  Downloading " + to_download.length + " package(s) in parallel...");
+    }
+
+    // Download in batches of MAX_PARALLEL_DOWNLOADS
+    i = 0;
+    while (i < to_download.length) {
+        let batch_end = i + MAX_PARALLEL_DOWNLOADS;
+        if (batch_end > to_download.length) {
+            batch_end = to_download.length;
+        }
+
+        // Fork child processes for this batch
+        let pids = [];
+        let j = i;
+        while (j < batch_end) {
+            let pkg = to_download[j];
+            let pid = fork();
+
+            if (pid == 0) {
+                // Child process - download and cache
+                try {
+                    let tag_version = pkg.version;
+                    if (tag_version.length > 0 && tag_version[0] != 'v') {
+                        tag_version = "v" + tag_version;
+                    }
+                    let tarball_data = github.download_tarball(pkg.owner, pkg.repo, tag_version);
+                    cache.store_tarball(pkg.owner, pkg.repo, pkg.version, tarball_data);
+                    exit(0);
+                } catch (e) {
+                    exit(1);
+                }
+            } else {
+                // Parent - track child pid
+                pids.push({ pid: pid, pkg: pkg });
+            }
+            j = j + 1;
+        }
+
+        // Wait for all children in this batch
+        j = 0;
+        while (j < pids.length) {
+            let status = waitpid(pids[j].pid);
+            if (status != 0 && verbose) {
+                print("    Warning: Failed to download " + pids[j].pkg.name);
+            }
+            j = j + 1;
+        }
+
+        i = batch_end;
+    }
+}
+
 // Install all resolved packages
-export fn install_all(resolved, project_dir: string, lockfile, verbose: bool) {
+// Set offline=true to install only from cache (no network requests)
+// Set parallel=true to download packages in parallel before extraction
+export fn install_all(resolved, project_dir: string, lockfile, verbose: bool, offline: bool, parallel: bool) {
+    // Prefetch packages to cache in parallel (unless offline)
+    if (!offline && parallel) {
+        prefetch_packages(resolved, verbose);
+    }
+
     let keys = resolved.keys();
     let i = 0;
     while (i < keys.length) {
@@ -238,7 +342,7 @@ export fn install_all(resolved, project_dir: string, lockfile, verbose: bool) {
         let resolution = resolved.get(pkg_name);
 
         // Install the package
-        let integrity = install_package(pkg_name, resolution, project_dir, verbose);
+        let integrity = install_package(pkg_name, resolution, project_dir, verbose, offline);
 
         // Update resolution with integrity
         resolution.integrity = integrity;
