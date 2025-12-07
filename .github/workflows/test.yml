@@ -30,4 +30,4 @@ jobs:
         run: hemlock --version
 
       - name: Run tests
-        run: hemlock test/run.hml
+        run: make test
