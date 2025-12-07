@@ -148,11 +148,14 @@ export fn prune(lockfile, manifest) {
         return { lockfile: lockfile, removed: [] };
     }
 
+    // Declare loop variable once
+    let i = 0;
+
     // Collect all root dependencies from manifest
     let roots = [];
     if (manifest.dependencies != null) {
         let keys = manifest.dependencies.keys();
-        let i = 0;
+        i = 0;
         while (i < keys.length) {
             roots.push(keys[i]);
             i = i + 1;
@@ -160,7 +163,7 @@ export fn prune(lockfile, manifest) {
     }
     if (manifest.devDependencies != null) {
         let keys = manifest.devDependencies.keys();
-        let i = 0;
+        i = 0;
         while (i < keys.length) {
             roots.push(keys[i]);
             i = i + 1;
@@ -172,7 +175,7 @@ export fn prune(lockfile, manifest) {
     let queue = [];
 
     // Initialize queue with roots that exist in lockfile
-    let i = 0;
+    i = 0;
     while (i < roots.length) {
         let root = roots[i];
         if (lockfile.dependencies[root] != null) {
