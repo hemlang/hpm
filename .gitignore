@@ -2,3 +2,6 @@
 *.hmlc
 *.hmlb
 *.hmlp
+
+# Built binary
+/hpm
