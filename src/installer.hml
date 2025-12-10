@@ -1,6 +1,6 @@
 // hpm - Package installer (downloads, extracts, installs packages)
 
-import { exists, read_file, write_file, make_dir, remove_dir, list_dir, is_dir } from "@stdlib/fs";
+import { exists, read_file, read_file_binary, write_file, make_dir, remove_dir, list_dir, is_dir } from "@stdlib/fs";
 import { sha256 } from "@stdlib/hash";
 import { fork, waitpid, exec } from "@stdlib/process";
 import { exit } from "@stdlib/env";
@@ -8,9 +8,110 @@ import { exit } from "@stdlib/env";
 import * as github from "./github.hml";
 import * as cache from "./cache.hml";
 import * as manifest from "./manifest.hml";
+import * as log from "./log.hml";
 
 // Maximum number of parallel downloads
 let MAX_PARALLEL_DOWNLOADS = 4;
+
+// Base64 alphabet for encoding
+let BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+// Calculate SHA256 integrity hash for a file
+// Returns string in format "sha256-<base64hash>"
+fn calculate_file_integrity(file_path: string): string {
+    log.debug("Calculating SHA256 integrity for: " + file_path);
+
+    // Read file as binary
+    let content = read_file_binary(file_path);
+    if (content == null) {
+        log.warn("Failed to read file for integrity check: " + file_path);
+        return "sha256-unknown";
+    }
+
+    // Calculate SHA256 hash (returns hex string)
+    let hash_hex = sha256(content);
+    log.debug("SHA256 hex: " + hash_hex);
+
+    // Convert hex to bytes then to base64
+    let hash_base64 = hex_to_base64(hash_hex);
+    log.debug("SHA256 base64: " + hash_base64);
+
+    return "sha256-" + hash_base64;
+}
+
+// Convert hex string to base64
+fn hex_to_base64(hex: string): string {
+    // Convert hex to bytes
+    let bytes = [];
+    let i = 0;
+    while (i < hex.length) {
+        let high = hex_char_to_int(hex[i]);
+        let low = hex_char_to_int(hex[i + 1]);
+        bytes.push(high * 16 + low);
+        i = i + 2;
+    }
+
+    // Convert bytes to base64
+    let result = "";
+    i = 0;
+    while (i < bytes.length) {
+        let b1 = bytes[i];
+        let b2 = 0;
+        let b3 = 0;
+        let padding = 0;
+
+        if (i + 1 < bytes.length) {
+            b2 = bytes[i + 1];
+        } else {
+            padding = 2;
+        }
+
+        if (i + 2 < bytes.length) {
+            b3 = bytes[i + 2];
+        } else if (padding == 0) {
+            padding = 1;
+        }
+
+        // Encode 3 bytes into 4 base64 characters
+        let c1 = b1 >> 2;
+        let c2 = ((b1 & 3) << 4) | (b2 >> 4);
+        let c3 = ((b2 & 15) << 2) | (b3 >> 6);
+        let c4 = b3 & 63;
+
+        result = result + BASE64_ALPHABET[c1];
+        result = result + BASE64_ALPHABET[c2];
+
+        if (padding == 2) {
+            result = result + "==";
+        } else if (padding == 1) {
+            result = result + BASE64_ALPHABET[c3] + "=";
+        } else {
+            result = result + BASE64_ALPHABET[c3];
+            result = result + BASE64_ALPHABET[c4];
+        }
+
+        i = i + 3;
+    }
+
+    return result;
+}
+
+// Convert hex character to integer
+fn hex_char_to_int(ch: rune): i32 {
+    if (ch >= '0' && ch <= '9') {
+        let result: i32 = ch;
+        return result - 48;  // '0' is ASCII 48
+    }
+    if (ch >= 'a' && ch <= 'f') {
+        let result: i32 = ch;
+        return result - 87;  // 'a' is ASCII 97, 97-87=10
+    }
+    if (ch >= 'A' && ch <= 'F') {
+        let result: i32 = ch;
+        return result - 55;  // 'A' is ASCII 65, 65-55=10
+    }
+    return 0;
+}
 
 // Install a resolved package to hem_modules
 // Set offline=true to install only from cache (no network requests)
@@ -104,8 +205,11 @@ export fn install_package(pkg_name: string, resolution, project_dir: string, ver
     // Clean up temp extraction dir
     remove_dir_recursive(extract_dir);
 
-    // Calculate integrity from file
-    let integrity = "sha256-unknown";  // TODO: calculate sha256 of tarball file
+    // Calculate integrity from tarball file
+    let integrity = calculate_file_integrity(tarball_path);
+    if (verbose) {
+        print("    Integrity: " + integrity);
+    }
 
     return integrity;
 }
@@ -389,6 +493,7 @@ export fn get_installed(project_dir: string) {
 }
 
 // Verify integrity of installed packages
+// Checks both installation existence and cached tarball integrity
 export fn verify_integrity(project_dir: string, lockfile) {
     let issues = [];
 
@@ -406,14 +511,32 @@ export fn verify_integrity(project_dir: string, lockfile) {
         if (parts != null) {
             let install_dir = project_dir + "/hem_modules/" + parts.owner + "/" + parts.repo;
 
+            // Check if package is installed
             if (!exists(install_dir)) {
                 issues.push({
                     package: pkg_name,
                     issue: "not installed"
                 });
             }
-            // Note: Full integrity verification would require re-downloading
-            // and comparing hashes, which is expensive. Skip for now.
+
+            // Verify integrity against cached tarball if we have a recorded hash
+            if (entry.integrity != null && entry.integrity != "" && entry.integrity != "sha256-unknown") {
+                let cached_path = cache.get_cached_path(parts.owner, parts.repo, entry.version);
+                if (cached_path != null && exists(cached_path)) {
+                    let actual_integrity = calculate_file_integrity(cached_path);
+                    if (actual_integrity != entry.integrity) {
+                        log.warn("Integrity mismatch for " + pkg_name);
+                        log.debug("Expected: " + entry.integrity);
+                        log.debug("Actual: " + actual_integrity);
+                        issues.push({
+                            package: pkg_name,
+                            issue: "integrity mismatch",
+                            expected: entry.integrity,
+                            actual: actual_integrity
+                        });
+                    }
+                }
+            }
         }
 
         i = i + 1;

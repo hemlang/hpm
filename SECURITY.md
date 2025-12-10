@@ -57,13 +57,19 @@ When using GitHub tokens:
    ```
 3. **Environment Variables**: When using `GITHUB_TOKEN`, be careful not to expose it in logs or shell history.
 
+### Integrity Checking
+
+hpm now calculates and stores SHA256 checksums for all downloaded packages in the lockfile. This provides:
+
+- **Tamper Detection**: Any modification to cached packages will be detected
+- **Reproducible Builds**: The lockfile records exact checksums for verification
+- **Verbose Output**: Run with `--verbose` to see integrity hashes during installation
+
 ### Known Limitations
 
-1. **Integrity Checking**: Package integrity verification via SHA256 checksums is planned but not yet implemented.
+1. **Signature Verification**: Package signature verification is not implemented. Trust is currently based on the GitHub account and SHA256 checksums.
 
-2. **Signature Verification**: Package signature verification is not implemented. Trust is currently based on the GitHub account.
-
-3. **Dependency Confusion**: hpm uses GitHub paths (owner/repo), which reduces but doesn't eliminate dependency confusion risks.
+2. **Dependency Confusion**: hpm uses GitHub paths (owner/repo), which reduces but doesn't eliminate dependency confusion risks.
 
 ## Best Practices
 
