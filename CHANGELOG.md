@@ -5,6 +5,23 @@ All notable changes to hpm will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **SHA256 integrity checking**: Package tarballs now have SHA256 checksums calculated and stored in lockfile
+- **Verbose/debug logging**: `--verbose` flag now outputs detailed debug information for troubleshooting
+- **Integration tests**: New test suite with timeout support for end-to-end workflow testing
+- **Test timeout support**: `test_with_timeout()` function for tests that may hang
+- **Skip test support**: `skip()` function for tests that require external dependencies
+- **CONTRIBUTING.md**: Comprehensive contributor documentation
+- **SECURITY.md**: Security policy and vulnerability reporting guidelines
+- **GitHub issue templates**: Bug report, feature request, and question templates
+- **Pull request template**: Standardized PR format with checklist
+
+### Changed
+- Enhanced `verify_integrity()` to actually verify cached tarballs against lockfile checksums
+- Improved Makefile with `test-unit` and `test-integration` targets
+
 ## [1.0.1] - 2024
 
 ### Changed

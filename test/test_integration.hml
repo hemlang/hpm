@@ -1,0 +1,277 @@
+// Integration tests for hpm
+// These tests verify end-to-end workflows and file system operations
+
+import { suite, test, test_with_timeout, skip, assert, assert_eq, assert_true, assert_false, assert_not_null } from "./framework.hml";
+import { exists, write_file, read_file, remove_file, make_dir, remove_dir, list_dir, cwd } from "@stdlib/fs";
+import { exec } from "@stdlib/process";
+import { getenv } from "@stdlib/env";
+
+import * as manifest from "../src/manifest.hml";
+import * as lockfile from "../src/lockfile.hml";
+import * as semver from "../src/semver.hml";
+import * as cache from "../src/cache.hml";
+
+// Test timeout for integration tests (10 seconds)
+let INTEGRATION_TIMEOUT = 10000;
+
+// Temporary test directory
+let TEST_DIR = "/tmp/hpm_integration_test";
+
+// Helper to clean up test directory
+fn setup_test_dir() {
+    if (exists(TEST_DIR)) {
+        let cleanup = exec("rm -rf '" + TEST_DIR + "'");
+    }
+    make_dir(TEST_DIR);
+}
+
+fn cleanup_test_dir() {
+    if (exists(TEST_DIR)) {
+        let cleanup = exec("rm -rf '" + TEST_DIR + "'");
+    }
+}
+
+export fn run() {
+    suite("Integration Tests");
+
+    // Test manifest creation and parsing round-trip
+    test("manifest round-trip", fn() {
+        setup_test_dir();
+
+        // Create a manifest
+        let pkg = manifest.create_default("test-user/test-package", "1.0.0");
+        pkg.description = "A test package";
+        pkg.license = "MIT";
+
+        // Write to disk
+        manifest.write_manifest(TEST_DIR, pkg);
+
+        // Verify file exists
+        assert_true(exists(TEST_DIR + "/package.json"), "package.json should exist");
+
+        // Read back
+        let loaded = manifest.read_manifest(TEST_DIR);
+        assert_not_null(loaded, "loaded manifest should not be null");
+        assert_eq(loaded.name, "test-user/test-package", "name should match");
+        assert_eq(loaded.version, "1.0.0", "version should match");
+        assert_eq(loaded.description, "A test package", "description should match");
+
+        cleanup_test_dir();
+    });
+
+    // Test lockfile creation and parsing round-trip
+    test("lockfile round-trip", fn() {
+        setup_test_dir();
+
+        // Create empty lockfile
+        let lock = lockfile.create_empty();
+
+        // Add some entries
+        let entry1 = lockfile.create_entry(
+            "1.2.3",
+            "https://github.com/owner/repo/archive/v1.2.3.tar.gz",
+            "sha256-abc123",
+            null
+        );
+        lock = lockfile.set_locked(lock, "owner/repo", entry1);
+
+        let entry2 = lockfile.create_entry(
+            "2.0.0",
+            "https://github.com/other/pkg/archive/v2.0.0.tar.gz",
+            "sha256-def456",
+            { "owner/repo": "^1.0.0" }
+        );
+        lock = lockfile.set_locked(lock, "other/pkg", entry2);
+
+        // Write to disk
+        lockfile.write_lockfile(TEST_DIR, lock);
+
+        // Verify file exists
+        assert_true(exists(TEST_DIR + "/package-lock.json"), "package-lock.json should exist");
+
+        // Read back
+        let loaded = lockfile.read_lockfile(TEST_DIR);
+        assert_not_null(loaded, "loaded lockfile should not be null");
+
+        let loaded_entry1 = lockfile.get_locked(loaded, "owner/repo");
+        assert_not_null(loaded_entry1, "entry1 should exist");
+        assert_eq(loaded_entry1.version, "1.2.3", "entry1 version should match");
+
+        let loaded_entry2 = lockfile.get_locked(loaded, "other/pkg");
+        assert_not_null(loaded_entry2, "entry2 should exist");
+        assert_eq(loaded_entry2.version, "2.0.0", "entry2 version should match");
+
+        cleanup_test_dir();
+    });
+
+    // Test dependency addition to manifest
+    test("add dependency to manifest", fn() {
+        setup_test_dir();
+
+        // Create initial manifest
+        let pkg = manifest.create_default("test/project", "0.1.0");
+        manifest.write_manifest(TEST_DIR, pkg);
+
+        // Add dependencies
+        pkg = manifest.add_dependency(pkg, "user/lib", "^1.0.0", false);
+        pkg = manifest.add_dependency(pkg, "user/dev-tool", "^2.0.0", true);  // dev dependency
+
+        // Verify in memory
+        assert_not_null(pkg.dependencies, "dependencies should exist");
+        assert_eq(pkg.dependencies["user/lib"], "^1.0.0", "dep version should match");
+        assert_not_null(pkg.devDependencies, "devDependencies should exist");
+        assert_eq(pkg.devDependencies["user/dev-tool"], "^2.0.0", "dev dep version should match");
+
+        // Write and read back
+        manifest.write_manifest(TEST_DIR, pkg);
+        let loaded = manifest.read_manifest(TEST_DIR);
+
+        assert_eq(loaded.dependencies["user/lib"], "^1.0.0", "loaded dep version should match");
+        assert_eq(loaded.devDependencies["user/dev-tool"], "^2.0.0", "loaded dev dep should match");
+
+        cleanup_test_dir();
+    });
+
+    // Test lockfile pruning
+    test("lockfile prune removes orphans", fn() {
+        setup_test_dir();
+
+        // Create manifest with one dependency
+        let pkg = manifest.create_default("test/project", "1.0.0");
+        pkg = manifest.add_dependency(pkg, "keep/this", "^1.0.0", false);
+
+        // Create lockfile with extra entries
+        let lock = lockfile.create_empty();
+        lock = lockfile.set_locked(lock, "keep/this", lockfile.create_entry("1.0.0", "", "", null));
+        lock = lockfile.set_locked(lock, "remove/this", lockfile.create_entry("1.0.0", "", "", null));
+        lock = lockfile.set_locked(lock, "also/remove", lockfile.create_entry("2.0.0", "", "", null));
+
+        // Prune
+        let result = lockfile.prune(lock, pkg);
+        let pruned = result.result;
+        let removed = result.removed;
+
+        // Check results
+        assert_not_null(lockfile.get_locked(pruned, "keep/this"), "keep/this should still exist");
+        assert_eq(lockfile.get_locked(pruned, "remove/this"), null, "remove/this should be removed");
+        assert_eq(lockfile.get_locked(pruned, "also/remove"), null, "also/remove should be removed");
+        assert_eq(removed.length, 2, "should have removed 2 packages");
+
+        cleanup_test_dir();
+    });
+
+    // Test semver constraint satisfaction
+    test("semver constraint matching", fn() {
+        // Test caret ranges
+        let caret = semver.parse_constraint("^1.2.3");
+        assert_true(semver.satisfies(semver.parse("1.2.3"), caret), "1.2.3 satisfies ^1.2.3");
+        assert_true(semver.satisfies(semver.parse("1.9.9"), caret), "1.9.9 satisfies ^1.2.3");
+        assert_false(semver.satisfies(semver.parse("2.0.0"), caret), "2.0.0 does not satisfy ^1.2.3");
+        assert_false(semver.satisfies(semver.parse("1.2.2"), caret), "1.2.2 does not satisfy ^1.2.3");
+
+        // Test tilde ranges
+        let tilde = semver.parse_constraint("~1.2.3");
+        assert_true(semver.satisfies(semver.parse("1.2.3"), tilde), "1.2.3 satisfies ~1.2.3");
+        assert_true(semver.satisfies(semver.parse("1.2.9"), tilde), "1.2.9 satisfies ~1.2.3");
+        assert_false(semver.satisfies(semver.parse("1.3.0"), tilde), "1.3.0 does not satisfy ~1.2.3");
+
+        // Test exact version
+        let exact = semver.parse_constraint("1.2.3");
+        assert_true(semver.satisfies(semver.parse("1.2.3"), exact), "1.2.3 satisfies 1.2.3");
+        assert_false(semver.satisfies(semver.parse("1.2.4"), exact), "1.2.4 does not satisfy 1.2.3");
+
+        // Test wildcard
+        let wild = semver.parse_constraint("*");
+        assert_true(semver.satisfies(semver.parse("1.0.0"), wild), "1.0.0 satisfies *");
+        assert_true(semver.satisfies(semver.parse("99.99.99"), wild), "99.99.99 satisfies *");
+    });
+
+    // Test cache directory creation
+    test_with_timeout("cache directory operations", fn() {
+        // Get home directory
+        let home = getenv("HOME");
+        if (home == null || home.length == 0) {
+            // Can't test without home directory
+            return;
+        }
+
+        let cache_dir = home + "/.hpm/cache";
+
+        // Cache operations should create directory if needed
+        let cached = cache.list_cached();
+        // This should not throw, and cache dir should exist after
+
+        // Just verify the function doesn't crash
+        assert_true(true, "cache list completed without error");
+    }, INTEGRATION_TIMEOUT);
+
+    // Test package name parsing
+    test("package name parsing", fn() {
+        // Valid names
+        let parts1 = manifest.split_name("owner/repo");
+        assert_not_null(parts1, "owner/repo should be valid");
+        assert_eq(parts1.owner, "owner", "owner should be 'owner'");
+        assert_eq(parts1.repo, "repo", "repo should be 'repo'");
+
+        let parts2 = manifest.split_name("my-org/my-package");
+        assert_not_null(parts2, "my-org/my-package should be valid");
+        assert_eq(parts2.owner, "my-org", "owner should be 'my-org'");
+        assert_eq(parts2.repo, "my-package", "repo should be 'my-package'");
+
+        // Invalid names
+        let invalid1 = manifest.split_name("no-slash");
+        assert_eq(invalid1, null, "no-slash should be invalid");
+
+        let invalid2 = manifest.split_name("");
+        assert_eq(invalid2, null, "empty string should be invalid");
+    });
+
+    // Test package specifier parsing
+    test("package specifier parsing", fn() {
+        // Name only
+        let spec1 = manifest.parse_specifier("owner/repo");
+        assert_eq(spec1.name, "owner/repo", "name should match");
+        assert_eq(spec1.version, "*", "version should be *");
+
+        // Name with version
+        let spec2 = manifest.parse_specifier("owner/repo@^1.0.0");
+        assert_eq(spec2.name, "owner/repo", "name should match");
+        assert_eq(spec2.version, "^1.0.0", "version should be ^1.0.0");
+
+        // Name with exact version
+        let spec3 = manifest.parse_specifier("owner/repo@1.2.3");
+        assert_eq(spec3.name, "owner/repo", "name should match");
+        assert_eq(spec3.version, "1.2.3", "version should be 1.2.3");
+    });
+
+    // Test version sorting
+    test("version sorting", fn() {
+        let versions = ["v1.0.0", "v2.0.0", "v1.5.0", "v1.0.1", "v0.9.0"];
+        let sorted = semver.sort(versions);
+
+        assert_eq(sorted[0], "v0.9.0", "first should be v0.9.0");
+        assert_eq(sorted[1], "v1.0.0", "second should be v1.0.0");
+        assert_eq(sorted[2], "v1.0.1", "third should be v1.0.1");
+        assert_eq(sorted[3], "v1.5.0", "fourth should be v1.5.0");
+        assert_eq(sorted[4], "v2.0.0", "fifth should be v2.0.0");
+    });
+
+    // Skip network tests if no GitHub token (to avoid rate limits)
+    let github_token = getenv("GITHUB_TOKEN");
+    if (github_token == null || github_token.length == 0) {
+        skip("GitHub API integration", "GITHUB_TOKEN not set - skipping to avoid rate limits");
+    } else {
+        // Only run network tests if we have a token
+        test_with_timeout("GitHub API - check repo exists", fn() {
+            import * as github from "../src/github.hml";
+
+            // Test with a known public repo
+            let exists_result = github.repo_exists("hemlang", "hemlock");
+            assert_true(exists_result, "hemlang/hemlock should exist");
+
+            // Test with non-existent repo
+            let not_exists = github.repo_exists("not-a-real-user-12345", "not-a-real-repo-67890");
+            assert_false(not_exists, "fake repo should not exist");
+        }, INTEGRATION_TIMEOUT);
+    }
+}

@@ -1,9 +1,16 @@
 // Simple test framework for hpm
 
+import { fork, waitpid_timeout, kill } from "@stdlib/process";
+import { exit } from "@stdlib/env";
+
 let tests_run = 0;
 let tests_passed = 0;
 let tests_failed = 0;
+let tests_skipped = 0;
 let current_suite = "";
+
+// Default timeout for tests (30 seconds)
+let DEFAULT_TIMEOUT_MS = 30000;
 
 // Start a test suite
 export fn suite(name: string) {
@@ -29,6 +36,52 @@ export fn test(name: string, test_fn) {
         print("  [FAIL] " + name);
         print("         " + e);
     }
+}
+
+// Run a test with a timeout (for integration tests that may hang)
+// timeout_ms: maximum time in milliseconds before the test is killed
+export fn test_with_timeout(name: string, test_fn, timeout_ms: i32) {
+    tests_run = tests_run + 1;
+    let full_name = name;
+    if (current_suite.length > 0) {
+        full_name = current_suite + " > " + name;
+    }
+
+    // Fork a child process to run the test
+    let pid = fork();
+
+    if (pid == 0) {
+        // Child process - run the test
+        try {
+            test_fn();
+            exit(0);  // Success
+        } catch (e) {
+            print("         " + e);
+            exit(1);  // Failure
+        }
+    } else {
+        // Parent process - wait with timeout
+        let result = waitpid_timeout(pid, timeout_ms);
+
+        if (result.timed_out) {
+            // Test timed out - kill the child process
+            kill(pid, 9);  // SIGKILL
+            tests_failed = tests_failed + 1;
+            print("  [TIMEOUT] " + name + " (exceeded " + timeout_ms + "ms)");
+        } else if (result.exit_code == 0) {
+            tests_passed = tests_passed + 1;
+            print("  [PASS] " + name);
+        } else {
+            tests_failed = tests_failed + 1;
+            print("  [FAIL] " + name);
+        }
+    }
+}
+
+// Skip a test (for tests that need external dependencies)
+export fn skip(name: string, reason: string) {
+    tests_skipped = tests_skipped + 1;
+    print("  [SKIP] " + name + " (" + reason + ")");
 }
 
 // Assertion helpers
@@ -90,7 +143,11 @@ export fn assert_throws(test_fn, message: string) {
 export fn summary(): i32 {
     print("");
     print("================================");
-    print("Tests: " + tests_run + " | Passed: " + tests_passed + " | Failed: " + tests_failed);
+    let summary_line = "Tests: " + tests_run + " | Passed: " + tests_passed + " | Failed: " + tests_failed;
+    if (tests_skipped > 0) {
+        summary_line = summary_line + " | Skipped: " + tests_skipped;
+    }
+    print(summary_line);
     print("================================");
 
     if (tests_failed > 0) {
@@ -115,4 +172,8 @@ export fn get_failed(): i32 {
 
 export fn get_total(): i32 {
     return tests_run;
+}
+
+export fn get_skipped(): i32 {
+    return tests_skipped;
 }
