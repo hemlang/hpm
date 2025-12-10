@@ -5,6 +5,7 @@ import * as env from "@stdlib/env";
 import { exists, read_file, cwd } from "@stdlib/fs";
 import { parse } from "@stdlib/json";
 import { fork, exec, waitpid } from "@stdlib/process";
+import { read_line } from "@stdlib/io";
 
 import * as manifest from "./manifest.hml";
 import * as lockfile from "./lockfile.hml";
@@ -98,6 +99,53 @@ fn get_positional_args(): array {
     return result;
 }
 
+// Prompt user for input with a default value
+// Returns the user's input or the default if they just press enter
+fn prompt(message: string, default_value: string): string {
+    if (default_value.length > 0) {
+        env.print_inline(message + " (" + default_value + "): ");
+    } else {
+        env.print_inline(message + ": ");
+    }
+
+    let input = read_line();
+    if (input == null) {
+        input = "";
+    }
+
+    // Trim whitespace
+    input = input.trim();
+
+    if (input.length == 0) {
+        return default_value;
+    }
+    return input;
+}
+
+// Prompt for yes/no confirmation
+fn prompt_confirm(message: string, default_yes: bool): bool {
+    let hint = "";
+    if (default_yes) {
+        hint = " (Y/n): ";
+    } else {
+        hint = " (y/N): ";
+    }
+
+    env.print_inline(message + hint);
+
+    let input = read_line();
+    if (input == null) {
+        input = "";
+    }
+    input = input.trim().to_lower();
+
+    if (input.length == 0) {
+        return default_yes;
+    }
+
+    return input == "y" || input == "yes";
+}
+
 // ============================================================================
 // Commands
 // ============================================================================
@@ -123,28 +171,98 @@ fn cmd_init() {
         username = "your-username";
     }
 
-    let pkg_name = username + "/" + dir_name;
-    let pkg_version = "0.1.0";
-    let pkg_description = "";
-    let pkg_author = "";
-    let pkg_license = "MIT";
+    // Default values
+    let default_name = username + "/" + dir_name;
+    let default_version = "0.1.0";
+    let default_description = "";
+    let default_main = "src/index.hml";
+    let default_author = "";
+    let default_license = "MIT";
+
+    let pkg_name = default_name;
+    let pkg_version = default_version;
+    let pkg_description = default_description;
+    let pkg_main = default_main;
+    let pkg_author = default_author;
+    let pkg_license = default_license;
 
     if (use_defaults) {
         // Use all defaults
         print("Creating package.json with defaults...");
     } else {
-        // Interactive mode - for now just use defaults
-        // (Full interactive mode would need readline support)
-        print("Creating package.json...");
-        print("  name: " + pkg_name);
-        print("  version: " + pkg_version);
-        print("  license: " + pkg_license);
+        // Interactive mode
+        print("This utility will walk you through creating a package.json file.");
+        print("Press ^C at any time to quit.");
+        print("");
+
+        // Prompt for each field
+        pkg_name = prompt("package name", default_name);
+
+        // Validate package name format
+        let name_valid = false;
+        while (!name_valid) {
+            let parts = manifest.split_name(pkg_name);
+            if (parts == null) {
+                print("  Package name must be in owner/repo format (e.g., " + default_name + ")");
+                pkg_name = prompt("package name", default_name);
+            } else {
+                name_valid = true;
+            }
+        }
+
+        pkg_version = prompt("version", default_version);
+
+        // Validate version format
+        let version_valid = false;
+        while (!version_valid) {
+            let parsed = semver.parse(pkg_version);
+            if (parsed == null) {
+                print("  Version must be valid semver (e.g., 1.0.0)");
+                pkg_version = prompt("version", default_version);
+            } else {
+                version_valid = true;
+            }
+        }
+
+        pkg_description = prompt("description", default_description);
+        pkg_main = prompt("entry point", default_main);
+        pkg_author = prompt("author", default_author);
+        pkg_license = prompt("license", default_license);
+
+        // Show preview
+        print("");
+        print("About to write to " + project_dir + "/package.json:");
+        print("");
+        print("{");
+        print("  \"name\": \"" + pkg_name + "\",");
+        print("  \"version\": \"" + pkg_version + "\",");
+        if (pkg_description.length > 0) {
+            print("  \"description\": \"" + pkg_description + "\",");
+        }
+        if (pkg_author.length > 0) {
+            print("  \"author\": \"" + pkg_author + "\",");
+        }
+        print("  \"license\": \"" + pkg_license + "\",");
+        print("  \"main\": \"" + pkg_main + "\",");
+        print("  \"dependencies\": {},");
+        print("  \"devDependencies\": {}");
+        print("}");
+        print("");
+
+        // Confirm
+        let confirmed = prompt_confirm("Is this OK?", true);
+        if (!confirmed) {
+            print("Aborted.");
+            env.exit(EXIT_SUCCESS);
+        }
     }
 
+    // Create the package manifest
     let pkg = manifest.create_default(pkg_name, pkg_version);
     pkg.description = pkg_description;
     pkg.author = pkg_author;
     pkg.license = pkg_license;
+    pkg.main = pkg_main;
 
     manifest.write_manifest(project_dir, pkg);
     print("Created package.json");
