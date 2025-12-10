@@ -2,6 +2,29 @@
 
 A package manager for the [Hemlock](https://github.com/hemlang/hemlock) programming language. hpm uses GitHub as its package registry, where packages are identified by their GitHub repository path (e.g., `hemlang/sprout`).
 
+## Documentation
+
+For comprehensive documentation, see the [docs/](docs/) directory:
+
+- **Getting Started**
+  - [Quick Start](docs/quick-start.md) - Get up and running in 5 minutes
+  - [Installation](docs/installation.md) - Detailed installation guide
+  - [Project Setup](docs/project-setup.md) - Project structure and configuration
+
+- **User Guide**
+  - [Command Reference](docs/commands.md) - All commands and options
+  - [Configuration](docs/configuration.md) - Environment variables and config files
+  - [Troubleshooting](docs/troubleshooting.md) - Common issues and solutions
+
+- **Package Development**
+  - [Creating Packages](docs/creating-packages.md) - Publish your own packages
+  - [Package Specification](docs/package-spec.md) - package.json format
+  - [Versioning](docs/versioning.md) - Semantic versioning guide
+
+- **Reference**
+  - [Exit Codes](docs/exit-codes.md) - CLI exit codes
+  - [Architecture](docs/architecture.md) - Internal design (for contributors)
+
 ## Installation
 
 hpm requires [Hemlock](https://github.com/hemlang/hemlock) to be installed first.
