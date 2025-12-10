@@ -13,6 +13,7 @@ import * as github from "./github.hml";
 import * as resolver from "./resolver.hml";
 import * as installer from "./installer.hml";
 import * as cache from "./cache.hml";
+import * as log from "./log.hml";
 
 // Version info
 let HPM_VERSION = "1.0.2";
@@ -160,12 +161,24 @@ fn cmd_install() {
     let is_dev = has_flag("--dev") || has_flag("-D");
     let pos_args = get_positional_args();
 
+    // Enable verbose logging if flag is set
+    if (verbose) {
+        log.enable_verbose();
+        log.debug("Verbose mode enabled");
+        log.debug("Project directory: " + project_dir);
+        log.debug("Dry run: " + dry_run);
+        log.debug("Offline: " + offline);
+        log.debug("Parallel: " + parallel);
+    }
+
     // Read existing manifest
     let pkg = manifest.read_manifest(project_dir);
     if (pkg == null) {
         print("No package.json found. Run 'hpm init' first.");
         env.exit(EXIT_INVALID_MANIFEST);
     }
+
+    log.debug("Read manifest: " + pkg.name + "@" + pkg.version);
 
     // Read existing lockfile
     let lock = lockfile.read_lockfile(project_dir);
@@ -222,6 +235,7 @@ fn cmd_install() {
 
     // Resolve all dependencies
     print("Resolving dependencies...");
+    log.debug("Starting dependency resolution");
 
     let resolved = null;
     try {
@@ -230,6 +244,8 @@ fn cmd_install() {
         print(e);
         env.exit(EXIT_CONFLICT);
     }
+
+    log.debug("Resolved " + resolved.keys().length + " packages");
 
     // Check for circular dependencies
     let cycle = resolver.detect_cycles(resolved);
@@ -335,6 +351,13 @@ fn cmd_uninstall() {
     let verbose = has_flag("--verbose");
     let pos_args = get_positional_args();
 
+    // Enable verbose logging if flag is set
+    if (verbose) {
+        log.enable_verbose();
+        log.debug("Verbose mode enabled");
+        log.debug("Project directory: " + project_dir);
+    }
+
     if (pos_args.length == 0) {
         print("Usage: hpm uninstall <package>");
         env.exit(EXIT_SUCCESS);
@@ -411,12 +434,23 @@ fn cmd_update() {
     let parallel = has_flag("--parallel");
     let pos_args = get_positional_args();
 
+    // Enable verbose logging if flag is set
+    if (verbose) {
+        log.enable_verbose();
+        log.debug("Verbose mode enabled");
+        log.debug("Project directory: " + project_dir);
+        log.debug("Offline: " + offline);
+        log.debug("Parallel: " + parallel);
+    }
+
     // Read manifest
     let pkg = manifest.read_manifest(project_dir);
     if (pkg == null) {
         print("No package.json found.");
         env.exit(EXIT_INVALID_MANIFEST);
     }
+
+    log.debug("Read manifest: " + pkg.name + "@" + pkg.version);
 
     // For now, just re-resolve and reinstall
     // A full update would compare with lockfile and only update changed packages

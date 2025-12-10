@@ -1,0 +1,59 @@
+// hpm - Logging utilities
+// Provides verbose/debug logging that can be enabled via --verbose flag
+
+let verbose_enabled = false;
+
+// Enable verbose logging
+export fn enable_verbose() {
+    verbose_enabled = true;
+}
+
+// Check if verbose is enabled
+export fn is_verbose(): bool {
+    return verbose_enabled;
+}
+
+// Debug level - only shown when verbose is enabled
+export fn debug(message: string) {
+    if (verbose_enabled) {
+        print("[debug] " + message);
+    }
+}
+
+// Info level - only shown when verbose is enabled
+export fn info(message: string) {
+    if (verbose_enabled) {
+        print("[info] " + message);
+    }
+}
+
+// Warn level - always shown
+export fn warn(message: string) {
+    print("[warn] " + message);
+}
+
+// Error level - always shown
+export fn error(message: string) {
+    print("[error] " + message);
+}
+
+// Debug with indentation for nested operations
+export fn debug_indent(indent: i32, message: string) {
+    if (verbose_enabled) {
+        let prefix = "";
+        let i = 0;
+        while (i < indent) {
+            prefix = prefix + "  ";
+            i = i + 1;
+        }
+        print("[debug] " + prefix + message);
+    }
+}
+
+// Log timing information
+export fn debug_timing(operation: string, start_time: i64, end_time: i64) {
+    if (verbose_enabled) {
+        let elapsed = end_time - start_time;
+        print("[debug] " + operation + " completed in " + elapsed + "ms");
+    }
+}
