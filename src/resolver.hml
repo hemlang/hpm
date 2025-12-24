@@ -166,10 +166,7 @@ fn resolve_version(pkg_name: string, pkg_constraints: array) {
 
     // Get package.json for this version to get transitive dependencies
     let pkg_json = github.get_package_json(parts.owner, parts.repo, best_version);
-    let deps = null;
-    if (pkg_json != null && pkg_json.dependencies != null) {
-        deps = pkg_json.dependencies;
-    }
+    let deps = manifest.safe_get(pkg_json, "dependencies");
 
     // Get tarball URL
     let tarball_url = github.get_tarball_url(parts.owner, parts.repo, best_version);
