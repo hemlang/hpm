@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Hemlock
+        run: |
+          # Clone and build Hemlock
+          git clone https://github.com/hemlang/hemlock.git /tmp/hemlock
+          cd /tmp/hemlock
+          make
+          sudo make install
+
+      - name: Verify Hemlock installation
+        run: hemlock --version
+
+      - name: Run tests
+        run: make test
+
+      - name: Create hpm wrapper
+        run: make all
+
+      - name: Test hpm --help
+        run: ./hpm --help
+
+      - name: Test hpm --version
+        run: ./hpm --version
+
+  lint:
+    name: Lint Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check for trailing whitespace
+        run: |
+          if grep -r --include="*.hml" '[[:space:]]$' src/ test/; then
+            echo "Found trailing whitespace in .hml files"
+            exit 1
+          fi
+          echo "No trailing whitespace found"
+
+      - name: Check for TODO comments
+        run: |
+          echo "Checking for TODO comments..."
+          grep -r --include="*.hml" "TODO" src/ || echo "No TODO comments found"

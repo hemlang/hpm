@@ -15,7 +15,7 @@ import * as installer from "./installer.hml";
 import * as cache from "./cache.hml";
 
 // Version info
-let HPM_VERSION = "1.0.2";
+let HPM_VERSION = "1.1.0";
 
 // Exit codes
 let EXIT_SUCCESS = 0;
@@ -54,9 +54,11 @@ fn print_usage() {
     print("  --version, -v     Show version number");
     print("  --dev, -D         Install as dev dependency");
     print("  --verbose         Show detailed output");
+    print("  --debug           Show debug information and stack traces");
     print("  --dry-run         Show what would be installed");
     print("  --offline         Install from cache only (no network)");
     print("  --parallel        Enable parallel downloads (experimental)");
+    print("  --skip-integrity  Skip SHA256 integrity verification");
     print("  --yes, -y         Accept all defaults");
     print("");
     print("Examples:");
@@ -102,6 +104,19 @@ fn get_positional_args(): array {
 // Commands
 // ============================================================================
 
+// Get flag value (e.g., --name=value)
+fn get_flag_value(flag_prefix: string): string {
+    let i = 1;
+    while (i < args.length) {
+        let arg = args[i];
+        if (arg.starts_with(flag_prefix)) {
+            return arg.substr(flag_prefix.length, arg.length - flag_prefix.length);
+        }
+        i = i + 1;
+    }
+    return null;
+}
+
 // hpm init
 fn cmd_init() {
     let project_dir = get_project_dir();
@@ -123,28 +138,97 @@ fn cmd_init() {
         username = "your-username";
     }
 
+    // Default values
     let pkg_name = username + "/" + dir_name;
     let pkg_version = "0.1.0";
     let pkg_description = "";
     let pkg_author = "";
     let pkg_license = "MIT";
+    let pkg_main = "src/main.hml";
+
+    // Override with command-line flags if provided
+    let flag_name = get_flag_value("--name=");
+    if (flag_name != null) {
+        pkg_name = flag_name;
+    }
+
+    let flag_version = get_flag_value("--version=");
+    if (flag_version != null) {
+        pkg_version = flag_version;
+    }
+
+    let flag_desc = get_flag_value("--description=");
+    if (flag_desc != null) {
+        pkg_description = flag_desc;
+    }
+
+    let flag_author = get_flag_value("--author=");
+    if (flag_author != null) {
+        pkg_author = flag_author;
+    }
+
+    let flag_license = get_flag_value("--license=");
+    if (flag_license != null) {
+        pkg_license = flag_license;
+    }
+
+    let flag_main = get_flag_value("--main=");
+    if (flag_main != null) {
+        pkg_main = flag_main;
+    }
+
+    // Try to detect git remote for repository field
+    let repository = "";
+    try {
+        let git_result = exec("git remote get-url origin 2>/dev/null");
+        if (git_result.exit_code == 0 && git_result.stdout != null) {
+            repository = git_result.stdout.trim();
+            // Convert SSH URL to HTTPS
+            if (repository.starts_with("git@github.com:")) {
+                repository = "https://github.com/" + repository.substr(15, repository.length - 15);
+            }
+            // Remove .git suffix
+            if (repository.ends_with(".git")) {
+                repository = repository.substr(0, repository.length - 4);
+            }
+        }
+    } catch (e) {
+        // Git not available or not a git repo, ignore
+    }
 
     if (use_defaults) {
-        // Use all defaults
         print("Creating package.json with defaults...");
     } else {
-        // Interactive mode - for now just use defaults
-        // (Full interactive mode would need readline support)
         print("Creating package.json...");
-        print("  name: " + pkg_name);
-        print("  version: " + pkg_version);
-        print("  license: " + pkg_license);
+        print("");
+        print("  Package Settings:");
+        print("    name:        " + pkg_name);
+        print("    version:     " + pkg_version);
+        print("    main:        " + pkg_main);
+        print("    license:     " + pkg_license);
+        if (repository.length > 0) {
+            print("    repository:  " + repository);
+        }
+        print("");
+        print("  Tip: Use flags to customize:");
+        print("    --name=owner/repo    Package name");
+        print("    --version=1.0.0      Initial version");
+        print("    --description=...    Package description");
+        print("    --author=...         Package author");
+        print("    --license=...        License (default: MIT)");
+        print("    --main=...           Entry point (default: src/main.hml)");
+        print("    --yes, -y            Accept defaults without prompts");
+        print("");
     }
 
     let pkg = manifest.create_default(pkg_name, pkg_version);
     pkg.description = pkg_description;
     pkg.author = pkg_author;
     pkg.license = pkg_license;
+    pkg.main = pkg_main;
+    if (repository.length > 0) {
+        pkg.repository = repository;
+    }
 
     manifest.write_manifest(project_dir, pkg);
     print("Created package.json");
@@ -152,11 +236,16 @@ fn cmd_init() {
 
 // hpm install
 fn cmd_install() {
+    import { time_ms } from "@stdlib/time";
+    let start_time = time_ms();
+
     let project_dir = get_project_dir();
     let verbose = has_flag("--verbose");
+    let debug = has_flag("--debug");
     let dry_run = has_flag("--dry-run");
     let offline = has_flag("--offline");
     let parallel = has_flag("--parallel");  // Sequential by default (parallel has issues with HTTP lib)
+    let skip_integrity = has_flag("--skip-integrity");
     let is_dev = has_flag("--dev") || has_flag("-D");
     let pos_args = get_positional_args();
 
@@ -263,9 +352,26 @@ fn cmd_install() {
     }
 
     try {
-        resolved = installer.install_all(resolved, project_dir, lock, verbose, offline, parallel);
+        resolved = installer.install_all(resolved, project_dir, lock, verbose, offline, parallel, skip_integrity);
     } catch (e) {
-        print("Installation failed: " + e);
+        print("");
+        print("ERROR: Installation failed");
+        print("  " + e);
+        if (debug) {
+            print("");
+            print("Debug info:");
+            print("  Project: " + project_dir);
+            print("  Offline: " + offline);
+            print("  Parallel: " + parallel);
+        }
+        print("");
+        print("Suggestions:");
+        print("  - Check your network connection");
+        print("  - Try 'hpm cache clean' and retry");
+        print("  - Use --verbose for more details");
+        if (!debug) {
+            print("  - Use --debug for stack traces");
+        }
         env.exit(EXIT_NETWORK_ERROR);
     }
 
@@ -290,8 +396,17 @@ fn cmd_install() {
     // Print native dependencies if any
     check_native_deps(resolved, project_dir);
 
+    // Calculate elapsed time
+    let end_time = time_ms();
+    let elapsed_ms = end_time - start_time;
+    let elapsed_sec = elapsed_ms / 1000;
+
     print("");
-    print("Done! Installed " + keys.length + " packages.");
+    if (elapsed_sec < 1) {
+        print("Done! Installed " + keys.length + " package(s) in " + elapsed_ms + "ms");
+    } else {
+        print("Done! Installed " + keys.length + " package(s) in " + elapsed_sec + "s");
+    }
 }
 
 // Check and print native dependency requirements
@@ -409,6 +524,7 @@ fn cmd_update() {
     let verbose = has_flag("--verbose");
     let offline = has_flag("--offline");
     let parallel = has_flag("--parallel");
+    let skip_integrity = has_flag("--skip-integrity");
     let pos_args = get_positional_args();
 
     // Read manifest
@@ -440,7 +556,7 @@ fn cmd_update() {
     } else {
         print("Installing packages...");
     }
-    resolved = installer.install_all(resolved, project_dir, lock, verbose, offline, parallel);
+    resolved = installer.install_all(resolved, project_dir, lock, verbose, offline, parallel, skip_integrity);
 
     // Update lockfile
     let keys = resolved.keys();

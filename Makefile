@@ -65,6 +65,12 @@ test-lockfile:
 test-cache:
 	$(HEMLOCK) -e 'import * as t from "./test/test_cache.hml"; import { summary } from "./test/framework.hml"; t.run(); summary();'
 
+test-resolver:
+	$(HEMLOCK) -e 'import * as t from "./test/test_resolver.hml"; import { summary } from "./test/framework.hml"; t.run(); summary();'
+
+test-installer:
+	$(HEMLOCK) -e 'import * as t from "./test/test_installer.hml"; import { summary } from "./test/framework.hml"; t.run(); summary();'
+
 # Show help
 help:
 	@echo "hpm Makefile targets:"
@@ -79,10 +85,12 @@ help:
 	@echo "  test-manifest  - Run only manifest tests"
 	@echo "  test-lockfile  - Run only lockfile tests"
 	@echo "  test-cache     - Run only cache tests"
+	@echo "  test-resolver  - Run only resolver tests"
+	@echo "  test-installer - Run only installer tests"
 	@echo "  help           - Show this help"
 	@echo ""
 	@echo "Variables:"
 	@echo "  PREFIX       - Installation prefix (default: /usr/local)"
 	@echo "  HEMLOCK      - Hemlock interpreter (default: hemlock)"
 
-.PHONY: all hpm build test install install-bundle uninstall clean help test-semver test-manifest test-lockfile test-cache
+.PHONY: all hpm build test install install-bundle uninstall clean help test-semver test-manifest test-lockfile test-cache test-resolver test-installer

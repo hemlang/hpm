@@ -1,0 +1,236 @@
+// Integration tests for resolver module
+
+import { suite, test, assert, assert_eq, assert_true, assert_false, assert_null, assert_not_null } from "./framework.hml";
+import * as resolver from "../src/resolver.hml";
+import { HashMap, Set } from "@stdlib/collections";
+
+export fn run() {
+    // ============================================================================
+    // detect_cycles tests
+    // ============================================================================
+
+    suite("resolver.detect_cycles");
+
+    test("detects simple cycle A->B->A", fn() {
+        let resolved = HashMap();
+        resolved.set("owner/a", {
+            version: "1.0.0",
+            dependencies: { "owner/b": "^1.0.0" }
+        });
+        resolved.set("owner/b", {
+            version: "1.0.0",
+            dependencies: { "owner/a": "^1.0.0" }
+        });
+
+        let cycle = resolver.detect_cycles(resolved);
+        assert_not_null(cycle, "should detect cycle");
+        assert(cycle.length >= 2, "cycle should have at least 2 elements");
+    });
+
+    test("detects longer cycle A->B->C->A", fn() {
+        let resolved = HashMap();
+        resolved.set("owner/a", {
+            version: "1.0.0",
+            dependencies: { "owner/b": "^1.0.0" }
+        });
+        resolved.set("owner/b", {
+            version: "1.0.0",
+            dependencies: { "owner/c": "^1.0.0" }
+        });
+        resolved.set("owner/c", {
+            version: "1.0.0",
+            dependencies: { "owner/a": "^1.0.0" }
+        });
+
+        let cycle = resolver.detect_cycles(resolved);
+        assert_not_null(cycle, "should detect cycle");
+        assert(cycle.length >= 3, "cycle should have at least 3 elements");
+    });
+
+    test("no cycle in linear dependency chain", fn() {
+        let resolved = HashMap();
+        resolved.set("owner/a", {
+            version: "1.0.0",
+            dependencies: { "owner/b": "^1.0.0" }
+        });
+        resolved.set("owner/b", {
+            version: "1.0.0",
+            dependencies: { "owner/c": "^1.0.0" }
+        });
+        resolved.set("owner/c", {
+            version: "1.0.0",
+            dependencies: {}
+        });
+
+        let cycle = resolver.detect_cycles(resolved);
+        assert_null(cycle, "should not detect cycle");
+    });
+
+    test("no cycle in diamond dependency", fn() {
+        let resolved = HashMap();
+        resolved.set("owner/a", {
+            version: "1.0.0",
+            dependencies: { "owner/b": "^1.0.0", "owner/c": "^1.0.0" }
+        });
+        resolved.set("owner/b", {
+            version: "1.0.0",
+            dependencies: { "owner/d": "^1.0.0" }
+        });
+        resolved.set("owner/c", {
+            version: "1.0.0",
+            dependencies: { "owner/d": "^1.0.0" }
+        });
+        resolved.set("owner/d", {
+            version: "1.0.0",
+            dependencies: {}
+        });
+
+        let cycle = resolver.detect_cycles(resolved);
+        assert_null(cycle, "should not detect cycle in diamond");
+    });
+
+    test("no cycle with empty dependencies", fn() {
+        let resolved = HashMap();
+        resolved.set("owner/a", {
+            version: "1.0.0",
+            dependencies: {}
+        });
+
+        let cycle = resolver.detect_cycles(resolved);
+        assert_null(cycle, "should not detect cycle");
+    });
+
+    test("no cycle with null dependencies", fn() {
+        let resolved = HashMap();
+        resolved.set("owner/a", {
+            version: "1.0.0",
+            dependencies: null
+        });
+
+        let cycle = resolver.detect_cycles(resolved);
+        assert_null(cycle, "should not detect cycle");
+    });
+
+    // ============================================================================
+    // build_tree tests
+    // ============================================================================
+
+    suite("resolver.build_tree");
+
+    test("builds simple tree", fn() {
+        let manifest = {
+            name: "test/project",
+            version: "1.0.0",
+            dependencies: { "owner/a": "^1.0.0" },
+            devDependencies: {}
+        };
+
+        let resolved = HashMap();
+        resolved.set("owner/a", {
+            version: "1.0.0",
+            dependencies: {}
+        });
+
+        let tree = resolver.build_tree(manifest, resolved, false);
+        assert_eq(tree.name, "test/project", "root name");
+        assert_eq(tree.version, "1.0.0", "root version");
+        assert_eq(tree.children.length, 1, "one child");
+        assert_eq(tree.children[0].name, "owner/a", "child name");
+    });
+
+    test("builds tree with nested dependencies", fn() {
+        let manifest = {
+            name: "test/project",
+            version: "1.0.0",
+            dependencies: { "owner/a": "^1.0.0" },
+            devDependencies: {}
+        };
+
+        let resolved = HashMap();
+        resolved.set("owner/a", {
+            version: "1.0.0",
+            dependencies: { "owner/b": "^1.0.0" }
+        });
+        resolved.set("owner/b", {
+            version: "1.0.0",
+            dependencies: {}
+        });
+
+        let tree = resolver.build_tree(manifest, resolved, false);
+        assert_eq(tree.children.length, 1, "one direct child");
+        assert_eq(tree.children[0].children.length, 1, "one nested child");
+        assert_eq(tree.children[0].children[0].name, "owner/b", "nested child name");
+    });
+
+    test("includes dev dependencies when flag is true", fn() {
+        let manifest = {
+            name: "test/project",
+            version: "1.0.0",
+            dependencies: { "owner/a": "^1.0.0" },
+            devDependencies: { "owner/test": "^1.0.0" }
+        };
+
+        let resolved = HashMap();
+        resolved.set("owner/a", { version: "1.0.0", dependencies: {} });
+        resolved.set("owner/test", { version: "1.0.0", dependencies: {} });
+
+        let tree = resolver.build_tree(manifest, resolved, true);
+        assert_eq(tree.children.length, 2, "two children with dev deps");
+    });
+
+    test("excludes dev dependencies when flag is false", fn() {
+        let manifest = {
+            name: "test/project",
+            version: "1.0.0",
+            dependencies: { "owner/a": "^1.0.0" },
+            devDependencies: { "owner/test": "^1.0.0" }
+        };
+
+        let resolved = HashMap();
+        resolved.set("owner/a", { version: "1.0.0", dependencies: {} });
+        resolved.set("owner/test", { version: "1.0.0", dependencies: {} });
+
+        let tree = resolver.build_tree(manifest, resolved, false);
+        assert_eq(tree.children.length, 1, "one child without dev deps");
+    });
+
+    // ============================================================================
+    // find_why tests
+    // ============================================================================
+
+    suite("resolver.find_why");
+
+    test("finds direct dependency", fn() {
+        let manifest = {
+            name: "test/project",
+            version: "1.0.0",
+            dependencies: { "owner/a": "^1.0.0" },
+            devDependencies: {}
+        };
+
+        let resolved = HashMap();
+        resolved.set("owner/a", { version: "1.0.0", dependencies: {} });
+
+        let chains = resolver.find_why("owner/a", manifest, resolved);
+        assert(chains.length > 0, "should find at least one chain");
+    });
+
+    test("finds transitive dependency", fn() {
+        let manifest = {
+            name: "test/project",
+            version: "1.0.0",
+            dependencies: { "owner/a": "^1.0.0" },
+            devDependencies: {}
+        };
+
+        let resolved = HashMap();
+        resolved.set("owner/a", {
+            version: "1.0.0",
+            dependencies: { "owner/b": "^1.0.0" }
+        });
+        resolved.set("owner/b", { version: "1.0.0", dependencies: {} });
+
+        let chains = resolver.find_why("owner/b", manifest, resolved);
+        assert(chains.length > 0, "should find chain for transitive dep");
+    });
+}
