@@ -12,9 +12,33 @@ import * as manifest from "./manifest.hml";
 // Maximum number of parallel downloads
 let MAX_PARALLEL_DOWNLOADS = 4;
 
+// Compute SHA256 hash of a file and return as "sha256-<hex>" format
+fn compute_file_hash(file_path: string): string {
+    let content = read_file(file_path);
+    if (content == null) {
+        return null;
+    }
+    let hash = sha256(content);
+    return "sha256-" + hash;
+}
+
+// Verify file hash matches expected integrity value
+fn verify_integrity(file_path: string, expected: string): bool {
+    if (expected == null || expected == "sha256-unknown") {
+        // No integrity to verify
+        return true;
+    }
+    let actual = compute_file_hash(file_path);
+    if (actual == null) {
+        return false;
+    }
+    return actual == expected;
+}
+
 // Install a resolved package to hem_modules
 // Set offline=true to install only from cache (no network requests)
-export fn install_package(pkg_name: string, resolution, project_dir: string, verbose: bool, offline: bool) {
+// expected_integrity: if provided, verify the tarball matches this hash
+export fn install_package(pkg_name: string, resolution, project_dir: string, verbose: bool, offline: bool, expected_integrity: string) {
     let parts = manifest.split_name(pkg_name);
     if (parts == null) {
         throw "Invalid package name: " + pkg_name;
@@ -36,12 +60,27 @@ export fn install_package(pkg_name: string, resolution, project_dir: string, ver
 
     // Check cache first
     let tarball_path = null;
+    let from_cache = false;
     if (cache.is_cached(owner, repo, version)) {
         if (verbose) {
             print("    Using cached tarball");
         }
         tarball_path = cache.get_cached_path(owner, repo, version);
-    } else {
+        from_cache = true;
+
+        // Verify integrity of cached file if we have expected hash
+        if (expected_integrity != null && expected_integrity != "sha256-unknown") {
+            if (!verify_integrity(tarball_path, expected_integrity)) {
+                if (verbose) {
+                    print("    WARNING: Cached file integrity mismatch, re-downloading...");
+                }
+                // Re-download if integrity check fails
+                from_cache = false;
+            }
+        }
+    }
+
+    if (!from_cache) {
         // In offline mode, fail if not in cache
         if (offline) {
             throw "Package " + pkg_name + "@" + version + " not found in cache (offline mode)";
@@ -104,8 +143,18 @@ export fn install_package(pkg_name: string, resolution, project_dir: string, ver
     // Clean up temp extraction dir
     remove_dir_recursive(extract_dir);
 
-    // Calculate integrity from file
-    let integrity = "sha256-unknown";  // TODO: calculate sha256 of tarball file
+    // Calculate integrity hash from the tarball file
+    let integrity = compute_file_hash(tarball_path);
+    if (integrity == null) {
+        integrity = "sha256-unknown";
+    }
+
+    // Verify against expected integrity if provided (for fresh downloads)
+    if (!from_cache && expected_integrity != null && expected_integrity != "sha256-unknown") {
+        if (integrity != expected_integrity) {
+            throw "Integrity check failed for " + pkg_name + "@" + version + ": expected " + expected_integrity + ", got " + integrity;
+        }
+    }
 
     return integrity;
 }
@@ -273,20 +322,37 @@ fn prefetch_packages(resolved, verbose: bool) {
 // Install all resolved packages
 // Set offline=true to install only from cache (no network requests)
 // Set parallel=true to download packages in parallel before extraction
-export fn install_all(resolved, project_dir: string, lockfile, verbose: bool, offline: bool, parallel: bool) {
+// Set skip_integrity=true to skip SHA256 integrity verification
+export fn install_all(resolved, project_dir: string, lockfile, verbose: bool, offline: bool, parallel: bool, skip_integrity: bool) {
     // Prefetch packages to cache in parallel (unless offline)
     if (!offline && parallel) {
         prefetch_packages(resolved, verbose);
     }
 
     let keys = resolved.keys();
+    let total = keys.length;
     let i = 0;
     while (i < keys.length) {
         let pkg_name = keys[i];
         let resolution = resolved.get(pkg_name);
 
-        // Install the package
-        let integrity = install_package(pkg_name, resolution, project_dir, verbose, offline);
+        // Show progress indicator (when not in verbose mode, which has its own output)
+        if (!verbose) {
+            let progress = "[" + (i + 1) + "/" + total + "]";
+            print("  " + progress + " " + pkg_name + "@" + resolution.version);
+        }
+
+        // Get expected integrity from lockfile if available (unless skipping)
+        let expected_integrity = null;
+        if (!skip_integrity && lockfile != null && lockfile.dependencies != null) {
+            let lock_entry = lockfile.dependencies[pkg_name];
+            if (lock_entry != null) {
+                expected_integrity = lock_entry["integrity"];
+            }
+        }
+
+        // Install the package with integrity verification
+        let integrity = install_package(pkg_name, resolution, project_dir, verbose, offline, expected_integrity);
 
         // Update resolution with integrity
         resolution.integrity = integrity;
