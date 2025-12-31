@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x86_64
+          - os: macos-latest
+            target: darwin-arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout hpm
+        uses: actions/checkout@v4
+
+      - name: Checkout hemlock
+        uses: actions/checkout@v4
+        with:
+          repository: hemlang/hemlock
+          path: hemlock
+
+      - name: Build hemlock
+        run: |
+          cd hemlock
+          make
+          ./hemlock --version
+
+      - name: Verify hemlock build
+        run: hemlock/hemlock --version
+
+      - name: Run tests
+        run: |
+          export PATH="$PWD/hemlock:$PATH"
+          make test
+
+      - name: Create release package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE_NAME="hpm-${VERSION}-${{ matrix.target }}"
+          mkdir -p "${PACKAGE_NAME}/bin"
+          mkdir -p "${PACKAGE_NAME}/lib/hpm"
+
+          # Copy hemlock binary
+          cp hemlock/hemlock "${PACKAGE_NAME}/bin/"
+
+          # Copy hpm source files
+          cp -r src "${PACKAGE_NAME}/lib/hpm/"
+          cp package.json "${PACKAGE_NAME}/lib/hpm/"
+          cp LICENSE "${PACKAGE_NAME}/lib/hpm/" 2>/dev/null || true
+          cp README.md "${PACKAGE_NAME}/lib/hpm/" 2>/dev/null || true
+
+          # Create hpm wrapper script
+          cat > "${PACKAGE_NAME}/bin/hpm" << 'EOF'
+          #!/bin/sh
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          exec "${SCRIPT_DIR}/hemlock" "${SCRIPT_DIR}/../lib/hpm/src/main.hml" "$@"
+          EOF
+          chmod +x "${PACKAGE_NAME}/bin/hpm"
+
+          # Create install script
+          cat > "${PACKAGE_NAME}/install.sh" << 'EOF'
+          #!/bin/sh
+          set -e
+
+          PREFIX="${1:-/usr/local}"
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+          echo "Installing hpm to ${PREFIX}..."
+
+          # Create directories
+          mkdir -p "${PREFIX}/bin"
+          mkdir -p "${PREFIX}/lib/hpm"
+
+          # Copy hemlock binary
+          cp "${SCRIPT_DIR}/bin/hemlock" "${PREFIX}/bin/"
+          chmod +x "${PREFIX}/bin/hemlock"
+
+          # Copy hpm source files
+          cp -r "${SCRIPT_DIR}/lib/hpm/"* "${PREFIX}/lib/hpm/"
+
+          # Create hpm wrapper
+          cat > "${PREFIX}/bin/hpm" << WRAPPER
+          #!/bin/sh
+          exec "${PREFIX}/bin/hemlock" "${PREFIX}/lib/hpm/src/main.hml" "\$@"
+          WRAPPER
+          chmod +x "${PREFIX}/bin/hpm"
+
+          echo "Installation complete!"
+          echo "Make sure ${PREFIX}/bin is in your PATH"
+          EOF
+          chmod +x "${PACKAGE_NAME}/install.sh"
+
+          # Create tarball
+          tar -czvf "${PACKAGE_NAME}.tar.gz" "${PACKAGE_NAME}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hpm-${{ matrix.target }}
+          path: hpm-*-${{ matrix.target }}.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.tar.gz
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
