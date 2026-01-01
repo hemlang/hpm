@@ -15,7 +15,7 @@ import * as installer from "./installer.hml";
 import * as cache from "./cache.hml";
 
 // Version info
-let HPM_VERSION = "1.0.3";
+let HPM_VERSION = "1.0.4";
 
 // Exit codes
 let EXIT_SUCCESS = 0;
