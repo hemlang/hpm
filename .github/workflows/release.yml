@@ -47,8 +47,8 @@ jobs:
       - name: Build static hpm binary
         run: |
           export PATH="$PWD/hemlock:$PATH"
-          # Use hemlockc to package hpm as a standalone static binary
-          hemlock --package src/main.hml -o hpm
+          # Use hemlockc to compile hpm as a static binary
+          hemlockc --static src/main.hml -o hpm
           chmod +x hpm
           # Verify the binary works
           ./hpm --version

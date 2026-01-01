@@ -17,7 +17,7 @@ hpm:
 
 # Build a static standalone binary (self-contained, no runtime dependencies)
 build:
-	$(HEMLOCK) --package src/main.hml -o hpm-static
+	hemlockc --static src/main.hml -o hpm-static
 	@echo "Built static binary: hpm-static"
 
 # Build the bundled bytecode (NOTE: bundler has dedup bug)
