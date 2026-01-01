@@ -15,8 +15,13 @@ hpm:
 	@chmod +x hpm
 	@echo "Created ./hpm wrapper script"
 
-# Build the bundled executable (NOTE: bundler has dedup bug, use install-dev instead)
+# Build a static standalone binary (self-contained, no runtime dependencies)
 build:
+	$(HEMLOCK) --package src/main.hml -o hpm-static
+	@echo "Built static binary: hpm-static"
+
+# Build the bundled bytecode (NOTE: bundler has dedup bug)
+build-bundle:
 	$(HEMLOCK) --bundle src/main.hml -o hpm.hmlc
 
 # Run the test suite
@@ -31,8 +36,15 @@ install:
 	@chmod +x $(BINDIR)/hpm
 	@echo "hpm installed to $(BINDIR)/hpm"
 
+# Install hpm using static binary (recommended for distribution)
+install-static: build
+	@mkdir -p $(BINDIR)
+	@cp hpm-static $(BINDIR)/hpm
+	@chmod +x $(BINDIR)/hpm
+	@echo "hpm (static binary) installed to $(BINDIR)/hpm"
+
 # Install hpm using bundled version (has issues due to bundler bug)
-install-bundle: build
+install-bundle: build-bundle
 	@mkdir -p $(BINDIR)
 	@echo '#!/bin/sh' > $(BINDIR)/hpm
 	@echo 'exec $(HEMLOCK) "$(PREFIX)/lib/hpm/hpm.hmlc" "$$@"' >> $(BINDIR)/hpm
@@ -49,7 +61,7 @@ uninstall:
 
 # Clean build artifacts
 clean:
-	@rm -f hpm.hmlc hpm
+	@rm -f hpm.hmlc hpm hpm-static
 	@echo "Cleaned build artifacts"
 
 # Run a specific test file
@@ -69,9 +81,11 @@ test-cache:
 help:
 	@echo "hpm Makefile targets:"
 	@echo "  all            - Create hpm wrapper script (default)"
-	@echo "  build          - Build bundled hpm.hmlc (has bundler bug)"
+	@echo "  build          - Build static standalone binary"
+	@echo "  build-bundle   - Build bundled hpm.hmlc (has bundler bug)"
 	@echo "  test           - Run all tests"
-	@echo "  install        - Install hpm to system"
+	@echo "  install        - Install hpm to system (runs from source)"
+	@echo "  install-static - Install static binary (recommended)"
 	@echo "  install-bundle - Install bundled version (has issues)"
 	@echo "  uninstall      - Remove hpm from system"
 	@echo "  clean          - Remove build artifacts"
@@ -85,4 +99,4 @@ help:
 	@echo "  PREFIX       - Installation prefix (default: /usr/local)"
 	@echo "  HEMLOCK      - Hemlock interpreter (default: hemlock)"
 
-.PHONY: all hpm build test install install-bundle uninstall clean help test-semver test-manifest test-lockfile test-cache
+.PHONY: all hpm build build-bundle test install install-static install-bundle uninstall clean help test-semver test-manifest test-lockfile test-cache
