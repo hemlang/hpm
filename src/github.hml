@@ -242,8 +242,14 @@ export fn download_tarball(owner: string, repo: string, version: string): string
         throw "Failed to download tarball: empty response";
     }
 
-    // Write binary data to file
-    write_file(tmpfile, response.body);
+    // Write binary data to file (use file handle for binary support)
+    let f = open(tmpfile, "w");
+    if (typeof(response.body) == "buffer") {
+        f.write_bytes(response.body);
+    } else {
+        f.write(response.body);
+    }
+    f.close();
 
     // Verify file exists
     if (!exists(tmpfile)) {

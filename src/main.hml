@@ -306,8 +306,8 @@ fn check_native_deps(resolved, project_dir: string) {
         if (parts != null) {
             let pkg_path = project_dir + "/hem_modules/" + parts.owner + "/" + parts.repo;
             let pkg = manifest.read_manifest(pkg_path);
-            if (pkg != null && pkg.native != null && pkg.native.requires != null) {
-                let reqs = pkg.native.requires;
+            let reqs = pkg?.native?.requires;
+            if (reqs != null) {
                 let j = 0;
                 while (j < reqs.length) {
                     native_reqs.push(reqs[j]);
