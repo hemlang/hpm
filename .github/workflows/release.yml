@@ -44,61 +44,48 @@ jobs:
           export PATH="$PWD/hemlock:$PATH"
           make test
 
+      - name: Build static hpm binary
+        run: |
+          export PATH="$PWD/hemlock:$PATH"
+          # Use hemlockc to compile hpm as a static binary
+          hemlockc --static src/main.hml -o hpm
+          chmod +x hpm
+          # Verify the binary works
+          ./hpm --version
+
       - name: Create release package
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           PACKAGE_NAME="hpm-${VERSION}-${{ matrix.target }}"
           mkdir -p "${PACKAGE_NAME}/bin"
-          mkdir -p "${PACKAGE_NAME}/lib/hpm"
 
-          # Copy hemlock binary
-          cp hemlock/hemlock "${PACKAGE_NAME}/bin/"
+          # Copy the static hpm binary
+          cp hpm "${PACKAGE_NAME}/bin/"
 
-          # Copy hpm source files
-          cp -r src "${PACKAGE_NAME}/lib/hpm/"
-          cp package.json "${PACKAGE_NAME}/lib/hpm/"
-          cp LICENSE "${PACKAGE_NAME}/lib/hpm/" 2>/dev/null || true
-          cp README.md "${PACKAGE_NAME}/lib/hpm/" 2>/dev/null || true
-
-          # Create hpm wrapper script
-          cat > "${PACKAGE_NAME}/bin/hpm" << 'EOF'
-          #!/bin/sh
-          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-          exec "${SCRIPT_DIR}/hemlock" "${SCRIPT_DIR}/../lib/hpm/src/main.hml" "$@"
-          EOF
-          chmod +x "${PACKAGE_NAME}/bin/hpm"
+          # Copy documentation
+          cp LICENSE "${PACKAGE_NAME}/" 2>/dev/null || true
+          cp README.md "${PACKAGE_NAME}/" 2>/dev/null || true
 
           # Create install script
           cat > "${PACKAGE_NAME}/install.sh" << 'EOF'
-          #!/bin/sh
-          set -e
+#!/bin/sh
+set -e
 
-          PREFIX="${1:-/usr/local}"
-          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PREFIX="${1:-/usr/local}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-          echo "Installing hpm to ${PREFIX}..."
+echo "Installing hpm to ${PREFIX}..."
 
-          # Create directories
-          mkdir -p "${PREFIX}/bin"
-          mkdir -p "${PREFIX}/lib/hpm"
+# Create directories
+mkdir -p "${PREFIX}/bin"
 
-          # Copy hemlock binary
-          cp "${SCRIPT_DIR}/bin/hemlock" "${PREFIX}/bin/"
-          chmod +x "${PREFIX}/bin/hemlock"
+# Copy hpm binary
+cp "${SCRIPT_DIR}/bin/hpm" "${PREFIX}/bin/"
+chmod +x "${PREFIX}/bin/hpm"
 
-          # Copy hpm source files
-          cp -r "${SCRIPT_DIR}/lib/hpm/"* "${PREFIX}/lib/hpm/"
-
-          # Create hpm wrapper
-          cat > "${PREFIX}/bin/hpm" << WRAPPER
-          #!/bin/sh
-          exec "${PREFIX}/bin/hemlock" "${PREFIX}/lib/hpm/src/main.hml" "\$@"
-          WRAPPER
-          chmod +x "${PREFIX}/bin/hpm"
-
-          echo "Installation complete!"
-          echo "Make sure ${PREFIX}/bin is in your PATH"
-          EOF
+echo "Installation complete!"
+echo "Make sure ${PREFIX}/bin is in your PATH"
+EOF
           chmod +x "${PACKAGE_NAME}/install.sh"
 
           # Create tarball
