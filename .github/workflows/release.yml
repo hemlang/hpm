@@ -67,25 +67,7 @@ jobs:
           cp README.md "${PACKAGE_NAME}/" 2>/dev/null || true
 
           # Create install script
-          cat > "${PACKAGE_NAME}/install.sh" << 'EOF'
-#!/bin/sh
-set -e
-
-PREFIX="${1:-/usr/local}"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-echo "Installing hpm to ${PREFIX}..."
-
-# Create directories
-mkdir -p "${PREFIX}/bin"
-
-# Copy hpm binary
-cp "${SCRIPT_DIR}/bin/hpm" "${PREFIX}/bin/"
-chmod +x "${PREFIX}/bin/hpm"
-
-echo "Installation complete!"
-echo "Make sure ${PREFIX}/bin is in your PATH"
-EOF
+          printf '%s\n' '#!/bin/sh' 'set -e' '' 'PREFIX="${1:-/usr/local}"' 'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"' '' 'echo "Installing hpm to ${PREFIX}..."' '' '# Create directories' 'mkdir -p "${PREFIX}/bin"' '' '# Copy hpm binary' 'cp "${SCRIPT_DIR}/bin/hpm" "${PREFIX}/bin/"' 'chmod +x "${PREFIX}/bin/hpm"' '' 'echo "Installation complete!"' 'echo "Make sure ${PREFIX}/bin is in your PATH"' > "${PACKAGE_NAME}/install.sh"
           chmod +x "${PACKAGE_NAME}/install.sh"
 
           # Create tarball
