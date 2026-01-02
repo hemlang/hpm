@@ -1,6 +1,6 @@
 // hpm - Global cache management
 
-import { exists, read_file, write_file, make_dir, list_dir, remove_file, remove_dir, is_dir } from "@stdlib/fs";
+import { exists, read_file, write_file, make_dir, list_dir, remove_file, remove_dir, is_dir, file_stat } from "@stdlib/fs";
 import * as env from "@stdlib/env";
 import { parse, stringify, pretty } from "@stdlib/json";
 import { exec } from "@stdlib/process";
@@ -248,9 +248,10 @@ export fn get_cache_size(): i64 {
     while (i < packages.length) {
         let pkg = packages[i];
         try {
-            let content = read_file(pkg.path);
-            if (content != null) {
-                total = total + content.length;
+            // Use file_stat to get file size without reading entire file into memory
+            let stat = file_stat(pkg.path);
+            if (stat != null && stat.size >= 0) {
+                total = total + stat.size;
             }
         } catch (e) {
             // Ignore errors

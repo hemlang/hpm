@@ -1,6 +1,6 @@
 {
   "name": "hemlang/hpm",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Hemlock Package Manager - A package manager for the Hemlock programming language",
   "author": "Hemlock Team",
   "license": "MIT",

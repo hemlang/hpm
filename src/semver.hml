@@ -73,7 +73,7 @@ export fn stringify(ver): string {
 }
 
 // Helper: Parse string to integer
-fn parse_int(s: string): i32 {
+export fn parse_int(s: string): i32 {
     let result = 0;
     let i = 0;
     let negative = false;
@@ -165,13 +165,13 @@ export fn parse_constraint(constraint_str: string) {
     }
 
     // Check for caret range (^)
-    if (s[0] == '^') {
+    if (s.length > 0 && s[0] == '^') {
         let ver = parse(s.substr(1, s.length - 1));
         return { type: "caret", version: ver };
     }
 
     // Check for tilde range (~)
-    if (s[0] == '~') {
+    if (s.length > 0 && s[0] == '~') {
         let ver = parse(s.substr(1, s.length - 1));
         return { type: "tilde", version: ver };
     }
@@ -189,13 +189,13 @@ export fn parse_constraint(constraint_str: string) {
     }
 
     // Check for >
-    if (s[0] == '>') {
+    if (s.length > 0 && s[0] == '>') {
         let ver = parse(s.substr(1, s.length - 1).trim());
         return { type: "gt", version: ver };
     }
 
     // Check for <
-    if (s[0] == '<') {
+    if (s.length > 0 && s[0] == '<') {
         let ver = parse(s.substr(1, s.length - 1).trim());
         return { type: "lt", version: ver };
     }
