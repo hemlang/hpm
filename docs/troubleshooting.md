@@ -4,6 +4,27 @@ Solutions to common hpm issues.
 
 ## Installation Issues
 
+### "Cannot call method 'write_bytes' on non-object (type: file)"
+
+**Cause:** This is a bug in Hemlock's runtime where compiled code cannot call file methods like `write_bytes()` on file handles. The runtime's `hml_call_method` function was missing dispatch logic for `HML_VAL_FILE` types.
+
+**Solution:**
+
+This requires a fix to the Hemlock compiler runtime. The fix involves:
+
+1. Adding `HML_VAL_FILE` type handling to `hml_call_method()` in `runtime/src/builtins.c`
+2. Implementing `hml_file_write_bytes()` for writing binary buffers to files
+3. Dispatching file methods: `read`, `write`, `write_bytes`, `seek`, `tell`, `close`
+
+**Workaround:** Until the fix is released, you can run hpm via the interpreter instead of using a compiled binary:
+
+```bash
+# Instead of running hpm directly
+hemlock /path/to/hpm/src/main.hml install
+```
+
+**Status:** This fix has been submitted to hemlang/hemlock. Update your Hemlock installation to get the fix.
+
 ### "hemlock: command not found"
 
 **Cause:** Hemlock is not installed or not in PATH.
