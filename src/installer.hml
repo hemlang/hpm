@@ -81,8 +81,7 @@ export fn install_package(pkg_name: string, resolution, project_dir: string, ver
     make_dir(extract_dir);
 
     // Extract tarball using system tar
-    let tar_cmd = "tar -xzf '" + tarball_path + "' -C '" + extract_dir + "'";
-    let tar_result = exec(tar_cmd);
+    let tar_result = exec("tar", ["-xzf", tarball_path, "-C", extract_dir]);
     if (tar_result.exit_code != 0) {
         throw "Failed to extract tarball: tar exited with status " + tar_result.exit_code;
     }
@@ -95,8 +94,7 @@ export fn install_package(pkg_name: string, resolution, project_dir: string, ver
     let root_dir = extract_dir + "/" + extracted_dirs[0];
 
     // Copy contents to install_dir
-    let copy_cmd = "cp -r '" + root_dir + "/.' '" + install_dir + "'";
-    let copy_result = exec(copy_cmd);
+    let copy_result = exec("cp", ["-r", root_dir + "/.", install_dir]);
     if (copy_result.exit_code != 0) {
         throw "Failed to copy extracted files";
     }
