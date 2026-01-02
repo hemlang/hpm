@@ -139,7 +139,7 @@ export fn store_tarball_file(owner: string, repo: string, version: string, src_p
     let dst_path = cache_dir + "/" + owner + "/" + repo + "/" + v + ".tar.gz";
 
     // Copy file using system cp
-    let result = exec("cp", [src_path, dst_path]);
+    let result = exec("cp " + src_path + " " + dst_path);
     if (result.exit_code != 0) {
         // Failed to copy - continue anyway, cache is optional
         return null;

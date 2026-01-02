@@ -680,22 +680,11 @@ fn cmd_run() {
     print("> " + script_cmd);
     print("");
 
-    // Execute the script
-    // Parse command and arguments
-    let parts = script_cmd.split(" ");
-    let cmd = parts[0];
-    let cmd_args = [];
-    let i = 1;
-    while (i < parts.length) {
-        cmd_args.push(parts[i]);
-        i = i + 1;
-    }
-
     // Fork and exec
     let pid = fork();
     if (pid == 0) {
         // Child process
-        exec(cmd, cmd_args);
+        exec(script_cmd);
         env.exit(1);  // exec failed
     } else {
         // Parent - wait for child
@@ -729,19 +718,10 @@ fn cmd_run_with_script(script_name: string) {
     print("> " + script_cmd);
     print("");
 
-    // Execute the script
-    let parts = script_cmd.split(" ");
-    let cmd = parts[0];
-    let cmd_args = [];
-    let i = 1;
-    while (i < parts.length) {
-        cmd_args.push(parts[i]);
-        i = i + 1;
-    }
-
+    // Fork and exec
     let pid = fork();
     if (pid == 0) {
-        exec(cmd, cmd_args);
+        exec(script_cmd);
         env.exit(1);
     } else {
         let status = waitpid(pid);
