@@ -5,7 +5,7 @@ import { parse } from "@stdlib/json";
 import * as env from "@stdlib/env";
 import { exists, read_file, write_file } from "@stdlib/fs";
 import { sleep, now } from "@stdlib/time";
-import { getpid } from "@stdlib/process";
+import { get_pid } from "@stdlib/process";
 
 // Retry configuration
 let MAX_RETRIES = 4;
@@ -13,7 +13,7 @@ let INITIAL_BACKOFF_MS = 1000;  // 1 second
 
 // Generate a unique suffix for temp files using PID and timestamp
 fn unique_suffix(): string {
-    let pid = getpid();
+    let pid = get_pid();
     let ts = now();
     return "" + pid + "_" + ts;
 }

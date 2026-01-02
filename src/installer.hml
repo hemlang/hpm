@@ -2,7 +2,7 @@
 
 import { exists, read_file, write_file, make_dir, remove_dir, list_dir, is_dir } from "@stdlib/fs";
 import { sha256 } from "@stdlib/hash";
-import { fork, waitpid, exec, getpid } from "@stdlib/process";
+import { fork, waitpid, exec, get_pid } from "@stdlib/process";
 import { exit } from "@stdlib/env";
 import { now } from "@stdlib/time";
 
@@ -15,7 +15,7 @@ let MAX_PARALLEL_DOWNLOADS = 4;
 
 // Generate a unique suffix for temp directories using PID and timestamp
 fn unique_suffix(): string {
-    let pid = getpid();
+    let pid = get_pid();
     let ts = now();
     return "" + pid + "_" + ts;
 }
