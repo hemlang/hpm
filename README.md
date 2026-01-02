@@ -27,7 +27,29 @@ For comprehensive documentation, see the [docs/](docs/) directory:
 
 ## Installation
 
-hpm requires [Hemlock](https://github.com/hemlang/hemlock) to be installed first.
+### Quick Install (Recommended)
+
+Install the latest release with a single command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hemlang/hpm/main/install.sh | sh
+```
+
+This automatically detects your OS and architecture, downloads the appropriate binary, and installs to `/usr/local/bin`.
+
+**Options:**
+
+```bash
+# Install to a custom location
+curl -fsSL https://raw.githubusercontent.com/hemlang/hpm/main/install.sh | sh -s -- --prefix ~/.local
+
+# Install a specific version
+curl -fsSL https://raw.githubusercontent.com/hemlang/hpm/main/install.sh | sh -s -- --version 1.0.5
+```
+
+### Install from Source
+
+If you prefer to build from source, hpm requires [Hemlock](https://github.com/hemlang/hemlock) to be installed first.
 
 ```bash
 # Clone the repository

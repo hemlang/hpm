@@ -2,7 +2,47 @@
 
 This guide covers how to install hpm on your system.
 
-## Prerequisites
+## Quick Install (Recommended)
+
+Install the latest release with a single command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hemlang/hpm/main/install.sh | sh
+```
+
+This automatically:
+- Detects your operating system (Linux, macOS)
+- Detects your architecture (x86_64, arm64)
+- Downloads the appropriate pre-built binary
+- Installs to `/usr/local/bin` (or uses sudo if needed)
+
+### Install Options
+
+```bash
+# Install to a custom location (no sudo required)
+curl -fsSL https://raw.githubusercontent.com/hemlang/hpm/main/install.sh | sh -s -- --prefix ~/.local
+
+# Install a specific version
+curl -fsSL https://raw.githubusercontent.com/hemlang/hpm/main/install.sh | sh -s -- --version 1.0.5
+
+# Combine options
+curl -fsSL https://raw.githubusercontent.com/hemlang/hpm/main/install.sh | sh -s -- --prefix ~/.local --version 1.0.5
+```
+
+### Supported Platforms
+
+| Platform | Architecture | Status |
+|----------|--------------|--------|
+| Linux    | x86_64       | ✓ Supported |
+| macOS    | x86_64       | ✓ Supported |
+| macOS    | arm64 (M1/M2/M3) | ✓ Supported |
+| Linux    | arm64        | Build from source |
+
+## Building from Source
+
+If you prefer to build from source or need a platform not covered by pre-built binaries, follow these instructions.
+
+### Prerequisites
 
 hpm requires [Hemlock](https://github.com/hemlang/hemlock) to be installed first. Follow the Hemlock installation instructions before proceeding.
 
@@ -14,9 +54,9 @@ hemlock --version
 
 ## Installation Methods
 
-### Method 1: Make Install (Recommended)
+### Method 1: Make Install
 
-This is the recommended installation method for most users.
+Build from source and install.
 
 ```bash
 # Clone the repository
