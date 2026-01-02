@@ -1,0 +1,83 @@
+diff --git a/runtime/include/hemlock_runtime.h b/runtime/include/hemlock_runtime.h
+index 0631473..559def4 100644
+--- a/runtime/include/hemlock_runtime.h
++++ b/runtime/include/hemlock_runtime.h
+@@ -419,6 +419,7 @@ HmlValue hml_open(HmlValue path, HmlValue mode);
+ HmlValue hml_file_read(HmlValue file, HmlValue size);
+ HmlValue hml_file_read_all(HmlValue file);
+ HmlValue hml_file_write(HmlValue file, HmlValue data);
++HmlValue hml_file_write_bytes(HmlValue file, HmlValue data);
+ HmlValue hml_file_seek(HmlValue file, HmlValue position);
+ HmlValue hml_file_tell(HmlValue file);
+ void hml_file_close(HmlValue file);
+diff --git a/runtime/src/builtins.c b/runtime/src/builtins.c
+index 516cd79..52839ca 100644
+--- a/runtime/src/builtins.c
++++ b/runtime/src/builtins.c
+@@ -2589,6 +2589,31 @@ HmlValue hml_call_method(HmlValue obj, const char *method, HmlValue *args, int n
+         hml_runtime_error("Array has no method '%s'", method);
+     }
+ 
++    // Handle file methods
++    if (obj.type == HML_VAL_FILE) {
++        if (strcmp(method, "read") == 0 && (num_args == 0 || num_args == 1)) {
++            HmlValue size = (num_args == 1) ? args[0] : hml_val_i32(0);
++            return hml_file_read(obj, size);
++        }
++        if (strcmp(method, "write") == 0 && num_args == 1) {
++            return hml_file_write(obj, args[0]);
++        }
++        if (strcmp(method, "write_bytes") == 0 && num_args == 1) {
++            return hml_file_write_bytes(obj, args[0]);
++        }
++        if (strcmp(method, "seek") == 0 && num_args == 1) {
++            return hml_file_seek(obj, args[0]);
++        }
++        if (strcmp(method, "tell") == 0 && num_args == 0) {
++            return hml_file_tell(obj);
++        }
++        if (strcmp(method, "close") == 0 && num_args == 0) {
++            hml_file_close(obj);
++            return hml_val_null();
++        }
++        hml_runtime_error("File has no method '%s'", method);
++    }
++
+     // Handle object methods
+     if (obj.type != HML_VAL_OBJECT || !obj.as.as_object) {
+         hml_runtime_error("Cannot call method '%s' on non-object (type: %s)",
+@@ -2803,6 +2828,34 @@ HmlValue hml_file_write(HmlValue file, HmlValue data) {
+     return hml_val_i32((int32_t)bytes_written);
+ }
+ 
++HmlValue hml_file_write_bytes(HmlValue file, HmlValue data) {
++    if (file.type != HML_VAL_FILE) {
++        fprintf(stderr, "Error: write_bytes() expects file object\n");
++        exit(1);
++    }
++
++    HmlFileHandle *fh = file.as.as_file;
++    if (fh->closed) {
++        fprintf(stderr, "Error: Cannot write to closed file '%s'\n", fh->path);
++        exit(1);
++    }
++
++    size_t bytes_written = 0;
++    if (data.type == HML_VAL_BUFFER) {
++        HmlBuffer *buf = data.as.as_buffer;
++        bytes_written = fwrite(buf->data, 1, buf->length, (FILE*)fh->fp);
++    } else if (data.type == HML_VAL_STRING) {
++        // Also allow writing strings as bytes
++        HmlString *str = data.as.as_string;
++        bytes_written = fwrite(str->data, 1, str->length, (FILE*)fh->fp);
++    } else {
++        fprintf(stderr, "Error: write_bytes() expects buffer or string argument\n");
++        exit(1);
++    }
++
++    return hml_val_i32((int32_t)bytes_written);
++}
++
+ HmlValue hml_file_seek(HmlValue file, HmlValue position) {
+     if (file.type != HML_VAL_FILE) {
+         fprintf(stderr, "Error: seek() expects file object\n");
