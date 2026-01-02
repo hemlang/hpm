@@ -2,8 +2,9 @@
 
 import { exists, read_file, write_file, make_dir, remove_dir, list_dir, is_dir } from "@stdlib/fs";
 import { sha256 } from "@stdlib/hash";
-import { fork, waitpid, exec } from "@stdlib/process";
+import { fork, waitpid, exec, getpid } from "@stdlib/process";
 import { exit } from "@stdlib/env";
+import { now } from "@stdlib/time";
 
 import * as github from "./github.hml";
 import * as cache from "./cache.hml";
@@ -11,6 +12,13 @@ import * as manifest from "./manifest.hml";
 
 // Maximum number of parallel downloads
 let MAX_PARALLEL_DOWNLOADS = 4;
+
+// Generate a unique suffix for temp directories using PID and timestamp
+fn unique_suffix(): string {
+    let pid = getpid();
+    let ts = now();
+    return "" + pid + "_" + ts;
+}
 
 // Install a resolved package to hem_modules
 // Set offline=true to install only from cache (no network requests)
@@ -73,8 +81,8 @@ export fn install_package(pkg_name: string, resolution, project_dir: string, ver
     }
     make_dir(install_dir);
 
-    // Create temp extraction dir
-    let extract_dir = "/tmp/hpm_extract_" + owner + "_" + repo + "_" + version;
+    // Create temp extraction dir with unique suffix to avoid race conditions
+    let extract_dir = "/tmp/hpm_extract_" + owner + "_" + repo + "_" + version + "_" + unique_suffix();
     if (exists(extract_dir)) {
         remove_dir_recursive(extract_dir);
     }
@@ -102,8 +110,17 @@ export fn install_package(pkg_name: string, resolution, project_dir: string, ver
     // Clean up temp extraction dir
     remove_dir_recursive(extract_dir);
 
-    // Calculate integrity from file
-    let integrity = "sha256-unknown";  // TODO: calculate sha256 of tarball file
+    // Calculate integrity from tarball file
+    let integrity = "sha256-unknown";
+    try {
+        let tarball_content = read_file(tarball_path);
+        if (tarball_content != null) {
+            let hash = sha256(tarball_content);
+            integrity = "sha256-" + hash;
+        }
+    } catch (e) {
+        // Keep unknown integrity if calculation fails
+    }
 
     return integrity;
 }

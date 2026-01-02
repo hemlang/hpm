@@ -4,11 +4,19 @@ import { get, get_binary, is_success } from "@stdlib/http";
 import { parse } from "@stdlib/json";
 import * as env from "@stdlib/env";
 import { exists, read_file, write_file } from "@stdlib/fs";
-import { sleep } from "@stdlib/time";
+import { sleep, now } from "@stdlib/time";
+import { getpid } from "@stdlib/process";
 
 // Retry configuration
 let MAX_RETRIES = 4;
 let INITIAL_BACKOFF_MS = 1000;  // 1 second
+
+// Generate a unique suffix for temp files using PID and timestamp
+fn unique_suffix(): string {
+    let pid = getpid();
+    let ts = now();
+    return "" + pid + "_" + ts;
+}
 
 // Get GitHub token from environment or config
 export fn get_token() {
@@ -48,7 +56,7 @@ fn github_request(url: string) {
     }
 
     headers.push("Accept: application/vnd.github.v3+json");
-    headers.push("User-Agent: hpm/1.0.0");
+    headers.push("User-Agent: hpm/1.0.6");
 
     let retries = 0;
     let backoff_ms = INITIAL_BACKOFF_MS;
@@ -222,7 +230,7 @@ export fn get_tarball_url(owner: string, repo: string, version: string): string 
 // Returns the path to the downloaded file
 export fn download_tarball(owner: string, repo: string, version: string): string {
     let url = get_tarball_url(owner, repo, version);
-    let tmpfile = "/tmp/hpm_tarball_" + owner + "_" + repo + "_" + version + ".tar.gz";
+    let tmpfile = "/tmp/hpm_tarball_" + owner + "_" + repo + "_" + version + "_" + unique_suffix() + ".tar.gz";
 
     // Build headers with auth if available
     let headers = [];
@@ -270,7 +278,7 @@ export fn repo_exists(owner: string, repo: string): bool {
     }
 
     headers.push("Accept: application/vnd.github.v3+json");
-    headers.push("User-Agent: hpm/1.0.0");
+    headers.push("User-Agent: hpm/1.0.6");
 
     let retries = 0;
     let backoff_ms = INITIAL_BACKOFF_MS;

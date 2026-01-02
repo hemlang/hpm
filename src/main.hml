@@ -15,7 +15,7 @@ import * as installer from "./installer.hml";
 import * as cache from "./cache.hml";
 
 // Version info
-let HPM_VERSION = "1.0.5";
+let HPM_VERSION = "1.0.6";
 
 // Exit codes
 let EXIT_SUCCESS = 0;
@@ -90,7 +90,7 @@ fn get_positional_args(): array {
     let i = 2;  // Skip script name and command
     while (i < args.length) {
         let arg = args[i];
-        if (arg[0] != '-') {
+        if (arg.length > 0 && arg[0] != '-') {
             result.push(arg);
         }
         i = i + 1;
@@ -203,7 +203,7 @@ fn cmd_install() {
                     let sorted = semver.sort(versions);
                     let latest = sorted[sorted.length - 1];
                     // Remove 'v' prefix
-                    if (latest[0] == 'v') {
+                    if (latest.length > 0 && latest[0] == 'v') {
                         latest = latest.substr(1, latest.length - 1);
                     }
                     version_constraint = "^" + latest;
@@ -475,7 +475,7 @@ fn cmd_list() {
         let arg = args[i];
         if (arg.starts_with("--depth=")) {
             let val = arg.substr(8, arg.length - 8);
-            depth = parse_int(val);
+            depth = semver.parse_int(val);
         }
         i = i + 1;
     }
@@ -563,21 +563,6 @@ fn print_tree(children: array, prefix: string, max_depth: i32, current_depth: i3
     }
 }
 
-fn parse_int(s: string): i32 {
-    let result = 0;
-    let i = 0;
-    while (i < s.length) {
-        let ch = s[i];
-        if (ch >= '0' && ch <= '9') {
-            let digit: i32 = ch;
-            digit = digit - 48;
-            result = result * 10 + digit;
-        }
-        i = i + 1;
-    }
-    return result;
-}
-
 // hpm outdated
 fn cmd_outdated() {
     let project_dir = get_project_dir();
@@ -622,14 +607,14 @@ fn cmd_outdated() {
                 if (versions.length > 0) {
                     let sorted = semver.sort(versions);
                     let latest = sorted[sorted.length - 1];
-                    if (latest[0] == 'v') {
+                    if (latest.length > 0 && latest[0] == 'v') {
                         latest = latest.substr(1, latest.length - 1);
                     }
 
                     // Find wanted (highest satisfying constraint)
                     let parsed_constraint = semver.parse_constraint(constraint);
                     let wanted = semver.max_satisfying(versions, parsed_constraint);
-                    if (wanted != null && wanted[0] == 'v') {
+                    if (wanted != null && wanted.length > 0 && wanted[0] == 'v') {
                         wanted = wanted.substr(1, wanted.length - 1);
                     }
                     if (wanted == null) {
