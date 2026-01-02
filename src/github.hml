@@ -56,7 +56,7 @@ fn github_request(url: string) {
     }
 
     headers.push("Accept: application/vnd.github.v3+json");
-    headers.push("User-Agent: hpm/1.0.6");
+    headers.push("User-Agent: hpm/1.0.7");
 
     let retries = 0;
     let backoff_ms = INITIAL_BACKOFF_MS;
@@ -278,7 +278,7 @@ export fn repo_exists(owner: string, repo: string): bool {
     }
 
     headers.push("Accept: application/vnd.github.v3+json");
-    headers.push("User-Agent: hpm/1.0.6");
+    headers.push("User-Agent: hpm/1.0.7");
 
     let retries = 0;
     let backoff_ms = INITIAL_BACKOFF_MS;
