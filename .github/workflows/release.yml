@@ -130,6 +130,9 @@ jobs:
       - name: Run tests
         run: |
           export PATH="$PWD/hemlock:$PATH"
+          # Workaround: hemlockc on macOS can't find stdlib via /proc/self/exe
+          # (Linux-only), so create symlink for CWD fallback path
+          ln -s hemlock/stdlib stdlib
           make test
 
       - name: Build static hpm binary
@@ -205,6 +208,9 @@ jobs:
       - name: Run tests
         run: |
           export PATH="$PWD/hemlock:$PATH"
+          # Workaround: hemlockc on macOS can't find stdlib via /proc/self/exe
+          # (Linux-only), so create symlink for CWD fallback path
+          ln -s hemlock/stdlib stdlib
           make test
 
       - name: Build static hpm binary
