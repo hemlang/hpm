@@ -9,16 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: linux-x86_64
-          - os: macos-latest
-            target: darwin-arm64
-
-    runs-on: ${{ matrix.os }}
+  build-linux:
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout hpm
@@ -29,6 +21,19 @@ jobs:
         with:
           repository: hemlang/hemlock
           path: hemlock
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libffi-dev \
+            zlib1g-dev \
+            libssl-dev \
+            libwebsockets-dev \
+            libcap-dev \
+            libuv1-dev \
+            libev-dev
 
       - name: Build hemlock
         run: |
@@ -47,40 +52,206 @@ jobs:
       - name: Build static hpm binary
         run: |
           export PATH="$PWD/hemlock:$PATH"
-          # Use hemlockc to compile hpm as a static binary
           hemlockc --static src/main.hml -o hpm
           chmod +x hpm
-          # Verify the binary works
           ./hpm --version
+
+      - name: Verify build
+        run: |
+          echo "=== Binary info ==="
+          file hpm
+          echo ""
+          echo "=== Dependencies ==="
+          ldd hpm 2>&1 || echo "✓ hpm is statically linked"
 
       - name: Create release package
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          PACKAGE_NAME="hpm-${VERSION}-${{ matrix.target }}"
+          PACKAGE_NAME="hpm-${VERSION}-linux-x86_64"
           mkdir -p "${PACKAGE_NAME}/bin"
 
-          # Copy the static hpm binary
           cp hpm "${PACKAGE_NAME}/bin/"
-
-          # Copy documentation
           cp LICENSE "${PACKAGE_NAME}/" 2>/dev/null || true
           cp README.md "${PACKAGE_NAME}/" 2>/dev/null || true
 
-          # Create install script
-          printf '%s\n' '#!/bin/sh' 'set -e' '' 'PREFIX="${1:-/usr/local}"' 'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"' '' 'echo "Installing hpm to ${PREFIX}..."' '' '# Create directories' 'mkdir -p "${PREFIX}/bin"' '' '# Copy hpm binary' 'cp "${SCRIPT_DIR}/bin/hpm" "${PREFIX}/bin/"' 'chmod +x "${PREFIX}/bin/hpm"' '' 'echo "Installation complete!"' 'echo "Make sure ${PREFIX}/bin is in your PATH"' > "${PACKAGE_NAME}/install.sh"
+          cat > "${PACKAGE_NAME}/install.sh" << 'EOF'
+          #!/bin/sh
+          set -e
+
+          PREFIX="${1:-/usr/local}"
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+          echo "Installing hpm to ${PREFIX}..."
+
+          mkdir -p "${PREFIX}/bin"
+          cp "${SCRIPT_DIR}/bin/hpm" "${PREFIX}/bin/"
+          chmod +x "${PREFIX}/bin/hpm"
+
+          echo "Installation complete!"
+          echo "Make sure ${PREFIX}/bin is in your PATH"
+          EOF
           chmod +x "${PACKAGE_NAME}/install.sh"
 
-          # Create tarball
           tar -czvf "${PACKAGE_NAME}.tar.gz" "${PACKAGE_NAME}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hpm-${{ matrix.target }}
-          path: hpm-*-${{ matrix.target }}.tar.gz
+          name: hpm-linux-x86_64
+          path: hpm-*-linux-x86_64.tar.gz
+
+  build-macos-intel:
+    runs-on: macos-13
+
+    steps:
+      - name: Checkout hpm
+        uses: actions/checkout@v4
+
+      - name: Checkout hemlock
+        uses: actions/checkout@v4
+        with:
+          repository: hemlang/hemlock
+          path: hemlock
+
+      - name: Install dependencies
+        run: |
+          brew install coreutils libffi openssl@3 libwebsockets
+          echo "$(brew --prefix coreutils)/libexec/gnubin" >> $GITHUB_PATH
+
+      - name: Build hemlock
+        run: |
+          cd hemlock
+          make
+          ./hemlock --version
+
+      - name: Verify hemlock build
+        run: hemlock/hemlock --version
+
+      - name: Run tests
+        run: |
+          export PATH="$PWD/hemlock:$PATH"
+          make test
+
+      - name: Build static hpm binary
+        run: |
+          export PATH="$PWD/hemlock:$PATH"
+          hemlockc --static src/main.hml -o hpm
+          chmod +x hpm
+          ./hpm --version
+
+      - name: Create release package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE_NAME="hpm-${VERSION}-darwin-x86_64"
+          mkdir -p "${PACKAGE_NAME}/bin"
+
+          cp hpm "${PACKAGE_NAME}/bin/"
+          cp LICENSE "${PACKAGE_NAME}/" 2>/dev/null || true
+          cp README.md "${PACKAGE_NAME}/" 2>/dev/null || true
+
+          cat > "${PACKAGE_NAME}/install.sh" << 'EOF'
+          #!/bin/sh
+          set -e
+
+          PREFIX="${1:-/usr/local}"
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+          echo "Installing hpm to ${PREFIX}..."
+
+          mkdir -p "${PREFIX}/bin"
+          cp "${SCRIPT_DIR}/bin/hpm" "${PREFIX}/bin/"
+          chmod +x "${PREFIX}/bin/hpm"
+
+          echo "Installation complete!"
+          echo "Make sure ${PREFIX}/bin is in your PATH"
+          EOF
+          chmod +x "${PACKAGE_NAME}/install.sh"
+
+          tar -czvf "${PACKAGE_NAME}.tar.gz" "${PACKAGE_NAME}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hpm-darwin-x86_64
+          path: hpm-*-darwin-x86_64.tar.gz
+
+  build-macos-arm:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout hpm
+        uses: actions/checkout@v4
+
+      - name: Checkout hemlock
+        uses: actions/checkout@v4
+        with:
+          repository: hemlang/hemlock
+          path: hemlock
+
+      - name: Install dependencies
+        run: |
+          brew install coreutils libffi openssl@3 libwebsockets
+          echo "$(brew --prefix coreutils)/libexec/gnubin" >> $GITHUB_PATH
+
+      - name: Build hemlock
+        run: |
+          cd hemlock
+          make
+          ./hemlock --version
+
+      - name: Verify hemlock build
+        run: hemlock/hemlock --version
+
+      - name: Run tests
+        run: |
+          export PATH="$PWD/hemlock:$PATH"
+          make test
+
+      - name: Build static hpm binary
+        run: |
+          export PATH="$PWD/hemlock:$PATH"
+          hemlockc --static src/main.hml -o hpm
+          chmod +x hpm
+          ./hpm --version
+
+      - name: Create release package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE_NAME="hpm-${VERSION}-darwin-arm64"
+          mkdir -p "${PACKAGE_NAME}/bin"
+
+          cp hpm "${PACKAGE_NAME}/bin/"
+          cp LICENSE "${PACKAGE_NAME}/" 2>/dev/null || true
+          cp README.md "${PACKAGE_NAME}/" 2>/dev/null || true
+
+          cat > "${PACKAGE_NAME}/install.sh" << 'EOF'
+          #!/bin/sh
+          set -e
+
+          PREFIX="${1:-/usr/local}"
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+          echo "Installing hpm to ${PREFIX}..."
+
+          mkdir -p "${PREFIX}/bin"
+          cp "${SCRIPT_DIR}/bin/hpm" "${PREFIX}/bin/"
+          chmod +x "${PREFIX}/bin/hpm"
+
+          echo "Installation complete!"
+          echo "Make sure ${PREFIX}/bin is in your PATH"
+          EOF
+          chmod +x "${PACKAGE_NAME}/install.sh"
+
+          tar -czvf "${PACKAGE_NAME}.tar.gz" "${PACKAGE_NAME}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hpm-darwin-arm64
+          path: hpm-*-darwin-arm64.tar.gz
 
   release:
-    needs: build
+    needs: [build-linux, build-macos-intel, build-macos-arm]
     runs-on: ubuntu-latest
 
     steps:
@@ -95,7 +266,33 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*.tar.gz
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
+          body: |
+            ## HPM - Hemlock Package Manager
+
+            Static binaries for all platforms. No runtime dependencies required.
+
+            ### Quick Install
+
+            ```bash
+            # Download and extract for your platform
+            tar -xzf hpm-<version>-<platform>.tar.gz
+            cd hpm-<version>-<platform>
+
+            # Install to /usr/local (or specify custom prefix)
+            ./install.sh
+            # Or: ./install.sh ~/.local
+            ```
+
+            ### Platform Binaries
+            - **Linux x86_64**: Works on any glibc-based distro (Ubuntu, Debian, Fedora, etc.)
+            - **macOS x86_64**: Intel Macs
+            - **macOS arm64**: Apple Silicon Macs (M1/M2/M3)
+          files: |
+            artifacts/hpm-linux-x86_64/*.tar.gz
+            artifacts/hpm-darwin-x86_64/*.tar.gz
+            artifacts/hpm-darwin-arm64/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
