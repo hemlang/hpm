@@ -2,6 +2,14 @@
 
 Get up and running with hpm in 5 minutes.
 
+## Install hpm
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hemlang/hpm/main/install.sh | sh
+```
+
+For more installation options, see the [Installation Guide](installation.md).
+
 ## Create a New Project
 
 Start by creating a new directory and initializing a package:
