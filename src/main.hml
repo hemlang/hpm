@@ -2,7 +2,7 @@
 // Main entry point
 
 import * as env from "@stdlib/env";
-import { exists, read_file, cwd } from "@stdlib/fs";
+import { exists, read_file, write_file, cwd, make_dir } from "@stdlib/fs";
 import { parse } from "@stdlib/json";
 import { fork, exec, waitpid } from "@stdlib/process";
 
@@ -38,7 +38,7 @@ fn print_usage() {
     print("Usage: hpm <command> [options]");
     print("");
     print("Commands:");
-    print("  init              Create a new package.json");
+    print("  init              Create a new Hemlock project");
     print("  install [pkg]     Install dependencies or a specific package");
     print("  uninstall <pkg>   Remove a package");
     print("  update [pkg]      Update dependencies");
@@ -58,9 +58,11 @@ fn print_usage() {
     print("  --offline         Install from cache only (no network)");
     print("  --parallel        Enable parallel downloads (experimental)");
     print("  --yes, -y         Accept all defaults");
+    print("  --name=<name>     Project name (for init)");
     print("");
     print("Examples:");
-    print("  hpm init");
+    print("  hpm init                         Initialize project in current directory");
+    print("  hpm init --name=my-project       Create new project directory");
     print("  hpm install hemlang/sprout@^1.0.0");
     print("  hpm install --dev hemlang/test-utils");
     print("  hpm run test");
@@ -98,6 +100,46 @@ fn get_positional_args(): array {
     return result;
 }
 
+fn get_flag_value(prefix: string): string {
+    let i = 1;
+    while (i < args.length) {
+        let arg = args[i];
+        if (arg.starts_with(prefix)) {
+            return arg.substr(prefix.length, arg.length - prefix.length);
+        }
+        i = i + 1;
+    }
+    return null;
+}
+
+fn ensure_dir(path: string) {
+    if (exists(path)) {
+        return;
+    }
+
+    let parts = path.split("/");
+    let current = "";
+
+    let i = 0;
+    while (i < parts.length) {
+        let part = parts[i];
+        if (part.length > 0) {
+            if (current.length == 0 && path[0] == '/') {
+                current = "/" + part;
+            } else if (current.length == 0) {
+                current = part;
+            } else {
+                current = current + "/" + part;
+            }
+
+            if (!exists(current)) {
+                make_dir(current);
+            }
+        }
+        i = i + 1;
+    }
+}
+
 // ============================================================================
 // Commands
 // ============================================================================
@@ -107,13 +149,25 @@ fn cmd_init() {
     let project_dir = get_project_dir();
     let use_defaults = has_flag("--yes") || has_flag("-y");
 
+    // Check for --name flag to create a new project directory
+    let project_name = get_flag_value("--name=");
+    if (project_name != null && project_name.length > 0) {
+        project_dir = project_dir + "/" + project_name;
+        if (exists(project_dir)) {
+            print("Directory already exists: " + project_name);
+            env.exit(1);
+        }
+        ensure_dir(project_dir);
+        print("Creating project: " + project_name);
+    }
+
     // Check if package.json already exists
     if (exists(project_dir + "/package.json")) {
         print("package.json already exists");
         env.exit(EXIT_SUCCESS);
     }
 
-    // Get current directory name for default package name
+    // Get project directory name for default package name
     let dir_parts = project_dir.split("/");
     let dir_name = dir_parts[dir_parts.length - 1];
 
@@ -125,29 +179,58 @@ fn cmd_init() {
 
     let pkg_name = username + "/" + dir_name;
     let pkg_version = "0.1.0";
-    let pkg_description = "";
-    let pkg_author = "";
+    let pkg_description = "A Hemlock project";
+    let pkg_author = username;
     let pkg_license = "MIT";
 
     if (use_defaults) {
         // Use all defaults
-        print("Creating package.json with defaults...");
+        print("Creating project with defaults...");
     } else {
         // Interactive mode - for now just use defaults
         // (Full interactive mode would need readline support)
-        print("Creating package.json...");
+        print("Creating project...");
         print("  name: " + pkg_name);
         print("  version: " + pkg_version);
         print("  license: " + pkg_license);
     }
 
+    // Create package.json
     let pkg = manifest.create_default(pkg_name, pkg_version);
     pkg.description = pkg_description;
     pkg.author = pkg_author;
     pkg.license = pkg_license;
-
+    pkg.main = "src/main.hml";
+    pkg.scripts = {
+        start: "hemlock src/main.hml",
+        test: "hemlock test/run.hml",
+        build: "hemlock build src/main.hml -o bin/" + dir_name
+    };
     manifest.write_manifest(project_dir, pkg);
-    print("Created package.json");
+    print("  Created package.json");
+
+    // Create src directory and main.hml
+    ensure_dir(project_dir + "/src");
+    let main_content = "// " + dir_name + " - Main entry point\n\nfn main() {\n    print(\"Hello, Hemlock!\");\n}\n\nmain();\n";
+    write_file(project_dir + "/src/main.hml", main_content);
+    print("  Created src/main.hml");
+
+    // Create .gitignore
+    let gitignore_content = "# Build outputs\n/build/\n*.o\n*.a\n*.so\n*.dylib\n\n# Compiled binaries (match project name)\n/bin/\n\n# Editor/IDE\n.vscode/\n.idea/\n*.swp\n*~\n\n# OS\n.DS_Store\nThumbs.db\n\n# hpm\n/hem_modules/\n/.hpm-cache/\n\n# Debug/profiling\n*.dSYM/\ncore\nvgcore.*\n";
+    write_file(project_dir + "/.gitignore", gitignore_content);
+    print("  Created .gitignore");
+
+    // Create README.md
+    let readme_content = "# " + dir_name + "\n\n" + pkg_description + "\n\n## Getting Started\n\n```bash\n# Install dependencies\nhpm install\n\n# Run the project\nhpm run start\n\n# Run tests\nhpm test\n\n# Build the project\nhpm run build\n```\n\n## License\n\n" + pkg_license + "\n";
+    write_file(project_dir + "/README.md", readme_content);
+    print("  Created README.md");
+
+    print("");
+    if (project_name != null && project_name.length > 0) {
+        print("Project created! Run 'cd " + project_name + "' to get started.");
+    } else {
+        print("Project initialized!");
+    }
 }
 
 // hpm install
