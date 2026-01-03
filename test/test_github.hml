@@ -1,0 +1,108 @@
+// Tests for github module (non-network functions)
+
+import { suite, test, assert, assert_eq, assert_true, assert_false, assert_null, assert_not_null } from "./framework.hml";
+import * as github from "../src/github.hml";
+
+export fn run() {
+    suite("github.get_tarball_url");
+
+    test("builds correct URL with v prefix", fn() {
+        let url = github.get_tarball_url("hemlang", "sprout", "v1.0.0");
+        assert_eq(url, "https://github.com/hemlang/sprout/archive/refs/tags/v1.0.0.tar.gz", "url with v");
+    });
+
+    test("adds v prefix if missing", fn() {
+        let url = github.get_tarball_url("hemlang", "sprout", "1.0.0");
+        assert_eq(url, "https://github.com/hemlang/sprout/archive/refs/tags/v1.0.0.tar.gz", "url without v");
+    });
+
+    test("handles complex version strings", fn() {
+        let url = github.get_tarball_url("owner", "repo", "v2.1.3-beta.1");
+        assert_eq(url, "https://github.com/owner/repo/archive/refs/tags/v2.1.3-beta.1.tar.gz", "complex version");
+    });
+
+    test("handles different owners and repos", fn() {
+        let url = github.get_tarball_url("my-org", "my-package", "v0.0.1");
+        assert_eq(url, "https://github.com/my-org/my-package/archive/refs/tags/v0.0.1.tar.gz", "custom org/repo");
+    });
+
+    test("handles single digit version", fn() {
+        let url = github.get_tarball_url("test", "pkg", "v1");
+        assert_eq(url, "https://github.com/test/pkg/archive/refs/tags/v1.tar.gz", "single digit");
+    });
+
+    suite("github.get_token (environment/config)");
+
+    test("returns null when no token configured", fn() {
+        // Note: This test assumes no GITHUB_TOKEN is set in the test environment
+        // and no config file exists. It tests the fallback behavior.
+        // In a real environment, this might return an actual token.
+        let token = github.get_token();
+        // We can't assert null because there might be a token configured
+        // Just verify it doesn't crash
+        assert_true(token == null || token.length >= 0, "token is null or string");
+    });
+
+    suite("github base64 decoding (internal)");
+
+    // Test base64 decoding by encoding and checking known values
+    // The base64_decode function is internal but we can test it indirectly
+    // by testing get_package_json with mock responses
+
+    test("tarball URL is HTTPS", fn() {
+        let url = github.get_tarball_url("any", "repo", "v1.0.0");
+        assert_true(url.starts_with("https://"), "should use HTTPS");
+    });
+
+    test("tarball URL contains .tar.gz extension", fn() {
+        let url = github.get_tarball_url("owner", "repo", "v1.0.0");
+        assert_true(url.ends_with(".tar.gz"), "should end with .tar.gz");
+    });
+
+    test("tarball URL contains owner", fn() {
+        let url = github.get_tarball_url("myowner", "myrepo", "v1.0.0");
+        assert_true(url.contains("/myowner/"), "should contain owner");
+    });
+
+    test("tarball URL contains repo", fn() {
+        let url = github.get_tarball_url("myowner", "myrepo", "v1.0.0");
+        assert_true(url.contains("/myrepo/"), "should contain repo");
+    });
+
+    test("tarball URL uses archive path", fn() {
+        let url = github.get_tarball_url("owner", "repo", "v1.0.0");
+        assert_true(url.contains("/archive/refs/tags/"), "should use archive path");
+    });
+
+    suite("github URL edge cases");
+
+    test("handles owner with hyphen", fn() {
+        let url = github.get_tarball_url("my-org-name", "repo", "v1.0.0");
+        assert_true(url.contains("/my-org-name/"), "hyphenated owner");
+    });
+
+    test("handles repo with hyphen", fn() {
+        let url = github.get_tarball_url("owner", "my-cool-repo", "v1.0.0");
+        assert_true(url.contains("/my-cool-repo/"), "hyphenated repo");
+    });
+
+    test("handles owner with underscore", fn() {
+        let url = github.get_tarball_url("my_org", "repo", "v1.0.0");
+        assert_true(url.contains("/my_org/"), "underscored owner");
+    });
+
+    test("handles repo with numbers", fn() {
+        let url = github.get_tarball_url("owner", "repo123", "v1.0.0");
+        assert_true(url.contains("/repo123/"), "repo with numbers");
+    });
+
+    test("handles prerelease version", fn() {
+        let url = github.get_tarball_url("owner", "repo", "v1.0.0-alpha.1");
+        assert_true(url.contains("v1.0.0-alpha.1"), "prerelease in URL");
+    });
+
+    test("handles build metadata in version", fn() {
+        let url = github.get_tarball_url("owner", "repo", "v1.0.0+build.123");
+        assert_true(url.contains("v1.0.0+build.123"), "build metadata in URL");
+    });
+}

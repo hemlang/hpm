@@ -1,0 +1,276 @@
+// Tests for installer module
+
+import { suite, test, assert, assert_eq, assert_true, assert_false, assert_null, assert_not_null } from "./framework.hml";
+import { exists, make_dir, remove_dir, write_file, is_dir, list_dir } from "@stdlib/fs";
+import * as installer from "../src/installer.hml";
+
+// Helper to remove directory recursively
+fn cleanup_dir(path: string) {
+    if (!exists(path)) {
+        return;
+    }
+    if (!is_dir(path)) {
+        return;
+    }
+    let entries = list_dir(path);
+    let i = 0;
+    while (i < entries.length) {
+        let entry_path = path + "/" + entries[i];
+        if (is_dir(entry_path)) {
+            cleanup_dir(entry_path);
+        }
+        i = i + 1;
+    }
+    remove_dir(path);
+}
+
+export fn run() {
+    suite("installer.get_installed");
+
+    test("returns empty array for non-existent hem_modules", fn() {
+        let installed = installer.get_installed("/tmp/hpm_test_nonexistent_dir_12345");
+        assert_eq(installed.length, 0, "no packages");
+    });
+
+    test("returns empty array for empty hem_modules", fn() {
+        let test_dir = "/tmp/hpm_test_empty_modules";
+        cleanup_dir(test_dir);
+        make_dir(test_dir);
+        make_dir(test_dir + "/hem_modules");
+
+        let installed = installer.get_installed(test_dir);
+        assert_eq(installed.length, 0, "no packages in empty dir");
+
+        cleanup_dir(test_dir);
+    });
+
+    test("finds installed package with package.json", fn() {
+        let test_dir = "/tmp/hpm_test_with_pkg";
+        cleanup_dir(test_dir);
+
+        // Create directory structure
+        make_dir(test_dir);
+        make_dir(test_dir + "/hem_modules");
+        make_dir(test_dir + "/hem_modules/testowner");
+        make_dir(test_dir + "/hem_modules/testowner/testrepo");
+
+        // Write package.json
+        write_file(test_dir + "/hem_modules/testowner/testrepo/package.json",
+            "{\"name\": \"testowner/testrepo\", \"version\": \"1.2.3\"}");
+
+        let installed = installer.get_installed(test_dir);
+        assert_eq(installed.length, 1, "one package");
+        assert_eq(installed[0].name, "testowner/testrepo", "package name");
+        assert_eq(installed[0].version, "1.2.3", "package version");
+
+        cleanup_dir(test_dir);
+    });
+
+    test("finds multiple installed packages", fn() {
+        let test_dir = "/tmp/hpm_test_multi_pkg";
+        cleanup_dir(test_dir);
+
+        // Create directory structure
+        make_dir(test_dir);
+        make_dir(test_dir + "/hem_modules");
+        make_dir(test_dir + "/hem_modules/owner1");
+        make_dir(test_dir + "/hem_modules/owner1/repo1");
+        make_dir(test_dir + "/hem_modules/owner2");
+        make_dir(test_dir + "/hem_modules/owner2/repo2");
+
+        write_file(test_dir + "/hem_modules/owner1/repo1/package.json",
+            "{\"name\": \"owner1/repo1\", \"version\": \"1.0.0\"}");
+        write_file(test_dir + "/hem_modules/owner2/repo2/package.json",
+            "{\"name\": \"owner2/repo2\", \"version\": \"2.0.0\"}");
+
+        let installed = installer.get_installed(test_dir);
+        assert_eq(installed.length, 2, "two packages");
+
+        cleanup_dir(test_dir);
+    });
+
+    test("handles package without package.json", fn() {
+        let test_dir = "/tmp/hpm_test_no_pkgjson";
+        cleanup_dir(test_dir);
+
+        make_dir(test_dir);
+        make_dir(test_dir + "/hem_modules");
+        make_dir(test_dir + "/hem_modules/owner");
+        make_dir(test_dir + "/hem_modules/owner/repo");
+        // No package.json file
+
+        let installed = installer.get_installed(test_dir);
+        assert_eq(installed.length, 1, "found package dir");
+        assert_eq(installed[0].version, "unknown", "unknown version");
+
+        cleanup_dir(test_dir);
+    });
+
+    test("handles multiple repos under same owner", fn() {
+        let test_dir = "/tmp/hpm_test_same_owner";
+        cleanup_dir(test_dir);
+
+        make_dir(test_dir);
+        make_dir(test_dir + "/hem_modules");
+        make_dir(test_dir + "/hem_modules/hemlang");
+        make_dir(test_dir + "/hem_modules/hemlang/sprout");
+        make_dir(test_dir + "/hem_modules/hemlang/utils");
+
+        write_file(test_dir + "/hem_modules/hemlang/sprout/package.json",
+            "{\"name\": \"hemlang/sprout\", \"version\": \"1.0.0\"}");
+        write_file(test_dir + "/hem_modules/hemlang/utils/package.json",
+            "{\"name\": \"hemlang/utils\", \"version\": \"2.0.0\"}");
+
+        let installed = installer.get_installed(test_dir);
+        assert_eq(installed.length, 2, "two packages same owner");
+
+        cleanup_dir(test_dir);
+    });
+
+    suite("installer.verify_integrity");
+
+    test("returns empty issues for null lockfile", fn() {
+        let issues = installer.verify_integrity("/tmp/test", null);
+        assert_eq(issues.length, 0, "no issues for null");
+    });
+
+    test("returns empty issues for lockfile without dependencies", fn() {
+        let lock = { dependencies: null };
+        let issues = installer.verify_integrity("/tmp/test", lock);
+        assert_eq(issues.length, 0, "no issues for empty deps");
+    });
+
+    test("detects missing package installation", fn() {
+        let test_dir = "/tmp/hpm_test_verify";
+        cleanup_dir(test_dir);
+        make_dir(test_dir);
+        make_dir(test_dir + "/hem_modules");
+
+        let lock = {
+            dependencies: {
+                "hemlang/missing": {
+                    version: "1.0.0",
+                    resolved: "https://example.com/pkg.tar.gz",
+                    integrity: "sha256-abc123"
+                }
+            }
+        };
+
+        let issues = installer.verify_integrity(test_dir, lock);
+        assert_eq(issues.length, 1, "one issue");
+        assert_eq(issues[0].package, "hemlang/missing", "missing package");
+        assert_eq(issues[0].issue, "not installed", "issue type");
+
+        cleanup_dir(test_dir);
+    });
+
+    test("no issues when package is installed", fn() {
+        let test_dir = "/tmp/hpm_test_verify_ok";
+        cleanup_dir(test_dir);
+
+        make_dir(test_dir);
+        make_dir(test_dir + "/hem_modules");
+        make_dir(test_dir + "/hem_modules/hemlang");
+        make_dir(test_dir + "/hem_modules/hemlang/installed");
+
+        let lock = {
+            dependencies: {
+                "hemlang/installed": {
+                    version: "1.0.0",
+                    resolved: "https://example.com/pkg.tar.gz",
+                    integrity: "sha256-abc123"
+                }
+            }
+        };
+
+        let issues = installer.verify_integrity(test_dir, lock);
+        assert_eq(issues.length, 0, "no issues");
+
+        cleanup_dir(test_dir);
+    });
+
+    test("detects multiple missing packages", fn() {
+        let test_dir = "/tmp/hpm_test_verify_multi";
+        cleanup_dir(test_dir);
+        make_dir(test_dir);
+        make_dir(test_dir + "/hem_modules");
+
+        let lock = {
+            dependencies: {
+                "owner/pkg1": { version: "1.0.0", resolved: "", integrity: "" },
+                "owner/pkg2": { version: "2.0.0", resolved: "", integrity: "" },
+                "owner/pkg3": { version: "3.0.0", resolved: "", integrity: "" }
+            }
+        };
+
+        let issues = installer.verify_integrity(test_dir, lock);
+        assert_eq(issues.length, 3, "three issues");
+
+        cleanup_dir(test_dir);
+    });
+
+    suite("installer.uninstall_package");
+
+    test("returns false for non-existent package", fn() {
+        let test_dir = "/tmp/hpm_test_uninstall_nonexist";
+        cleanup_dir(test_dir);
+        make_dir(test_dir);
+        make_dir(test_dir + "/hem_modules");
+
+        let result = installer.uninstall_package("nonexistent/pkg", test_dir, false);
+        assert_false(result, "should return false");
+
+        cleanup_dir(test_dir);
+    });
+
+    test("removes installed package", fn() {
+        let test_dir = "/tmp/hpm_test_uninstall_ok";
+        cleanup_dir(test_dir);
+
+        make_dir(test_dir);
+        make_dir(test_dir + "/hem_modules");
+        make_dir(test_dir + "/hem_modules/owner");
+        make_dir(test_dir + "/hem_modules/owner/repo");
+        write_file(test_dir + "/hem_modules/owner/repo/index.hml", "// code");
+
+        assert_true(exists(test_dir + "/hem_modules/owner/repo"), "package exists before");
+
+        let result = installer.uninstall_package("owner/repo", test_dir, false);
+        assert_true(result, "should return true");
+        assert_false(exists(test_dir + "/hem_modules/owner/repo"), "package removed");
+
+        cleanup_dir(test_dir);
+    });
+
+    test("cleans up empty owner directory after uninstall", fn() {
+        let test_dir = "/tmp/hpm_test_uninstall_cleanup";
+        cleanup_dir(test_dir);
+
+        make_dir(test_dir);
+        make_dir(test_dir + "/hem_modules");
+        make_dir(test_dir + "/hem_modules/singleowner");
+        make_dir(test_dir + "/hem_modules/singleowner/onlyrepo");
+
+        installer.uninstall_package("singleowner/onlyrepo", test_dir, false);
+        assert_false(exists(test_dir + "/hem_modules/singleowner"), "owner dir cleaned up");
+
+        cleanup_dir(test_dir);
+    });
+
+    test("keeps owner directory if other repos exist", fn() {
+        let test_dir = "/tmp/hpm_test_uninstall_keep";
+        cleanup_dir(test_dir);
+
+        make_dir(test_dir);
+        make_dir(test_dir + "/hem_modules");
+        make_dir(test_dir + "/hem_modules/owner");
+        make_dir(test_dir + "/hem_modules/owner/repo1");
+        make_dir(test_dir + "/hem_modules/owner/repo2");
+
+        installer.uninstall_package("owner/repo1", test_dir, false);
+        assert_true(exists(test_dir + "/hem_modules/owner"), "owner dir kept");
+        assert_true(exists(test_dir + "/hem_modules/owner/repo2"), "sibling kept");
+
+        cleanup_dir(test_dir);
+    });
+}

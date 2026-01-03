@@ -1,0 +1,287 @@
+// Tests for resolver module
+
+import { suite, test, assert, assert_eq, assert_true, assert_false, assert_null, assert_not_null, assert_throws } from "./framework.hml";
+import { HashMap, Set } from "@stdlib/collections";
+import * as resolver from "../src/resolver.hml";
+
+export fn run() {
+    suite("resolver.detect_cycles");
+
+    test("returns null when no cycles", fn() {
+        let resolved = HashMap();
+        resolved.set("hemlang/a", {
+            version: "1.0.0",
+            dependencies: { "hemlang/b": "^1.0.0" }
+        });
+        resolved.set("hemlang/b", {
+            version: "1.0.0",
+            dependencies: null
+        });
+
+        let cycle = resolver.detect_cycles(resolved);
+        assert_null(cycle, "should not detect cycle");
+    });
+
+    test("returns null for empty resolved map", fn() {
+        let resolved = HashMap();
+        let cycle = resolver.detect_cycles(resolved);
+        assert_null(cycle, "empty map has no cycles");
+    });
+
+    test("returns null for single package with no deps", fn() {
+        let resolved = HashMap();
+        resolved.set("hemlang/solo", {
+            version: "1.0.0",
+            dependencies: null
+        });
+
+        let cycle = resolver.detect_cycles(resolved);
+        assert_null(cycle, "single package has no cycle");
+    });
+
+    test("detects simple two-package cycle", fn() {
+        let resolved = HashMap();
+        resolved.set("hemlang/a", {
+            version: "1.0.0",
+            dependencies: { "hemlang/b": "^1.0.0" }
+        });
+        resolved.set("hemlang/b", {
+            version: "1.0.0",
+            dependencies: { "hemlang/a": "^1.0.0" }
+        });
+
+        let cycle = resolver.detect_cycles(resolved);
+        assert_not_null(cycle, "should detect cycle");
+        assert_true(cycle.length >= 2, "cycle should have at least 2 elements");
+    });
+
+    test("detects three-package cycle", fn() {
+        let resolved = HashMap();
+        resolved.set("hemlang/a", {
+            version: "1.0.0",
+            dependencies: { "hemlang/b": "^1.0.0" }
+        });
+        resolved.set("hemlang/b", {
+            version: "1.0.0",
+            dependencies: { "hemlang/c": "^1.0.0" }
+        });
+        resolved.set("hemlang/c", {
+            version: "1.0.0",
+            dependencies: { "hemlang/a": "^1.0.0" }
+        });
+
+        let cycle = resolver.detect_cycles(resolved);
+        assert_not_null(cycle, "should detect cycle");
+        assert_true(cycle.length >= 3, "cycle should have at least 3 elements");
+    });
+
+    test("detects self-referencing cycle", fn() {
+        let resolved = HashMap();
+        resolved.set("hemlang/self", {
+            version: "1.0.0",
+            dependencies: { "hemlang/self": "^1.0.0" }
+        });
+
+        let cycle = resolver.detect_cycles(resolved);
+        assert_not_null(cycle, "should detect self-reference");
+    });
+
+    test("no cycle with diamond dependency", fn() {
+        // A -> B, A -> C, B -> D, C -> D (diamond, no cycle)
+        let resolved = HashMap();
+        resolved.set("hemlang/a", {
+            version: "1.0.0",
+            dependencies: { "hemlang/b": "^1.0.0", "hemlang/c": "^1.0.0" }
+        });
+        resolved.set("hemlang/b", {
+            version: "1.0.0",
+            dependencies: { "hemlang/d": "^1.0.0" }
+        });
+        resolved.set("hemlang/c", {
+            version: "1.0.0",
+            dependencies: { "hemlang/d": "^1.0.0" }
+        });
+        resolved.set("hemlang/d", {
+            version: "1.0.0",
+            dependencies: null
+        });
+
+        let cycle = resolver.detect_cycles(resolved);
+        assert_null(cycle, "diamond is not a cycle");
+    });
+
+    suite("resolver.build_tree");
+
+    test("builds tree for root with no deps", fn() {
+        let manifest = {
+            name: "test/project",
+            version: "1.0.0",
+            dependencies: null,
+            devDependencies: null
+        };
+        let resolved = HashMap();
+
+        let tree = resolver.build_tree(manifest, resolved, false);
+        assert_eq(tree.name, "test/project", "tree name");
+        assert_eq(tree.version, "1.0.0", "tree version");
+        assert_eq(tree.children.length, 0, "no children");
+    });
+
+    test("builds tree with direct dependencies", fn() {
+        let manifest = {
+            name: "test/project",
+            version: "1.0.0",
+            dependencies: { "hemlang/a": "^1.0.0" },
+            devDependencies: null
+        };
+        let resolved = HashMap();
+        resolved.set("hemlang/a", {
+            version: "1.2.0",
+            dependencies: null
+        });
+
+        let tree = resolver.build_tree(manifest, resolved, false);
+        assert_eq(tree.children.length, 1, "one child");
+        assert_eq(tree.children[0].name, "hemlang/a", "child name");
+        assert_eq(tree.children[0].version, "1.2.0", "child version");
+    });
+
+    test("builds tree with transitive dependencies", fn() {
+        let manifest = {
+            name: "test/project",
+            version: "1.0.0",
+            dependencies: { "hemlang/a": "^1.0.0" },
+            devDependencies: null
+        };
+        let resolved = HashMap();
+        resolved.set("hemlang/a", {
+            version: "1.0.0",
+            dependencies: { "hemlang/b": "^2.0.0" }
+        });
+        resolved.set("hemlang/b", {
+            version: "2.1.0",
+            dependencies: null
+        });
+
+        let tree = resolver.build_tree(manifest, resolved, false);
+        assert_eq(tree.children.length, 1, "one direct child");
+        assert_eq(tree.children[0].name, "hemlang/a", "first level");
+        assert_eq(tree.children[0].children.length, 1, "has transitive");
+        assert_eq(tree.children[0].children[0].name, "hemlang/b", "transitive name");
+    });
+
+    test("includes dev dependencies when flag is true", fn() {
+        let manifest = {
+            name: "test/project",
+            version: "1.0.0",
+            dependencies: { "hemlang/prod": "^1.0.0" },
+            devDependencies: { "hemlang/dev": "^1.0.0" }
+        };
+        let resolved = HashMap();
+        resolved.set("hemlang/prod", { version: "1.0.0", dependencies: null });
+        resolved.set("hemlang/dev", { version: "1.0.0", dependencies: null });
+
+        let tree = resolver.build_tree(manifest, resolved, true);
+        assert_eq(tree.children.length, 2, "both deps included");
+    });
+
+    test("excludes dev dependencies when flag is false", fn() {
+        let manifest = {
+            name: "test/project",
+            version: "1.0.0",
+            dependencies: { "hemlang/prod": "^1.0.0" },
+            devDependencies: { "hemlang/dev": "^1.0.0" }
+        };
+        let resolved = HashMap();
+        resolved.set("hemlang/prod", { version: "1.0.0", dependencies: null });
+        resolved.set("hemlang/dev", { version: "1.0.0", dependencies: null });
+
+        let tree = resolver.build_tree(manifest, resolved, false);
+        assert_eq(tree.children.length, 1, "only prod dep");
+        assert_eq(tree.children[0].name, "hemlang/prod", "prod dep name");
+    });
+
+    suite("resolver.find_why");
+
+    test("finds direct dependency", fn() {
+        let manifest = {
+            name: "test/project",
+            version: "1.0.0",
+            dependencies: { "hemlang/direct": "^1.0.0" },
+            devDependencies: null
+        };
+        let resolved = HashMap();
+        resolved.set("hemlang/direct", { version: "1.0.0", dependencies: null });
+
+        let chains = resolver.find_why("hemlang/direct", manifest, resolved);
+        assert_true(chains.length >= 1, "should find chain");
+    });
+
+    test("finds dev dependency", fn() {
+        let manifest = {
+            name: "test/project",
+            version: "1.0.0",
+            dependencies: null,
+            devDependencies: { "hemlang/devpkg": "^1.0.0" }
+        };
+        let resolved = HashMap();
+        resolved.set("hemlang/devpkg", { version: "1.0.0", dependencies: null });
+
+        let chains = resolver.find_why("hemlang/devpkg", manifest, resolved);
+        assert_true(chains.length >= 1, "should find dev dep chain");
+    });
+
+    test("finds transitive dependency chain", fn() {
+        let manifest = {
+            name: "test/project",
+            version: "1.0.0",
+            dependencies: { "hemlang/a": "^1.0.0" },
+            devDependencies: null
+        };
+        let resolved = HashMap();
+        resolved.set("hemlang/a", {
+            version: "1.0.0",
+            dependencies: { "hemlang/b": "^1.0.0" }
+        });
+        resolved.set("hemlang/b", { version: "1.0.0", dependencies: null });
+
+        let chains = resolver.find_why("hemlang/b", manifest, resolved);
+        assert_true(chains.length >= 1, "should find transitive chain");
+    });
+
+    test("returns empty for unknown package", fn() {
+        let manifest = {
+            name: "test/project",
+            version: "1.0.0",
+            dependencies: { "hemlang/a": "^1.0.0" },
+            devDependencies: null
+        };
+        let resolved = HashMap();
+        resolved.set("hemlang/a", { version: "1.0.0", dependencies: null });
+
+        let chains = resolver.find_why("hemlang/unknown", manifest, resolved);
+        assert_eq(chains.length, 0, "no chains for unknown");
+    });
+
+    test("handles deep dependency chain", fn() {
+        let manifest = {
+            name: "test/project",
+            version: "1.0.0",
+            dependencies: { "hemlang/level1": "^1.0.0" },
+            devDependencies: null
+        };
+        let resolved = HashMap();
+        resolved.set("hemlang/level1", {
+            version: "1.0.0",
+            dependencies: { "hemlang/level2": "^1.0.0" }
+        });
+        resolved.set("hemlang/level2", {
+            version: "1.0.0",
+            dependencies: { "hemlang/level3": "^1.0.0" }
+        });
+        resolved.set("hemlang/level3", { version: "1.0.0", dependencies: null });
+
+        let chains = resolver.find_why("hemlang/level3", manifest, resolved);
+        assert_true(chains.length >= 1, "should find deep chain");
+    });
+}

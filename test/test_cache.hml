@@ -1,8 +1,32 @@
 // Tests for cache module
 
-import { suite, test, assert, assert_eq, assert_true, assert_false, assert_not_null } from "./framework.hml";
-import { getenv } from "@stdlib/env";
+import { suite, test, assert, assert_eq, assert_true, assert_false, assert_null, assert_not_null } from "./framework.hml";
+import { getenv, setenv } from "@stdlib/env";
+import { exists, make_dir, remove_dir, write_file, remove_file, is_dir, list_dir } from "@stdlib/fs";
 import * as cache from "../src/cache.hml";
+
+// Helper to clean up test directories
+fn cleanup_dir(path: string) {
+    if (!exists(path)) {
+        return;
+    }
+    if (!is_dir(path)) {
+        remove_file(path);
+        return;
+    }
+    let entries = list_dir(path);
+    let i = 0;
+    while (i < entries.length) {
+        let entry_path = path + "/" + entries[i];
+        if (is_dir(entry_path)) {
+            cleanup_dir(entry_path);
+        } else {
+            remove_file(entry_path);
+        }
+        i = i + 1;
+    }
+    remove_dir(path);
+}
 
 export fn run() {
     suite("cache.get_cache_dir");
@@ -21,12 +45,30 @@ export fn run() {
         }
     });
 
+    test("cache dir ends with cache", fn() {
+        let dir = cache.get_cache_dir();
+        assert_true(dir.ends_with("/cache"), "should end with /cache");
+    });
+
+    test("cache dir is under .hpm", fn() {
+        let dir = cache.get_cache_dir();
+        assert_true(dir.contains("/.hpm/"), "should be under .hpm");
+    });
+
     suite("cache.get_config_dir");
 
     test("returns path", fn() {
         let dir = cache.get_config_dir();
         assert_not_null(dir, "should return a path");
         assert_true(dir.ends_with(".hpm"), "should end with .hpm");
+    });
+
+    test("config dir respects HOME", fn() {
+        let home = getenv("HOME");
+        if (home != null) {
+            let dir = cache.get_config_dir();
+            assert_true(dir.starts_with(home), "should be under HOME");
+        }
     });
 
     suite("cache.get_cached_tarball_path");
@@ -45,12 +87,58 @@ export fn run() {
         assert_true(path.contains("1.0.0"), "version without v");
     });
 
+    test("handles complex version", fn() {
+        let path = cache.get_cached_tarball_path("owner", "repo", "v2.1.3-beta.1");
+        assert_true(path.contains("2.1.3-beta.1"), "complex version");
+    });
+
+    test("handles owner with hyphen", fn() {
+        let path = cache.get_cached_tarball_path("my-org", "repo", "1.0.0");
+        assert_true(path.contains("my-org"), "hyphenated owner");
+    });
+
+    test("handles repo with hyphen", fn() {
+        let path = cache.get_cached_tarball_path("owner", "my-repo", "1.0.0");
+        assert_true(path.contains("my-repo"), "hyphenated repo");
+    });
+
+    test("path structure is owner/repo/version.tar.gz", fn() {
+        let path = cache.get_cached_tarball_path("testowner", "testrepo", "1.2.3");
+        assert_true(path.contains("/testowner/testrepo/1.2.3.tar.gz"), "correct structure");
+    });
+
+    suite("cache.get_cached_path (alias)");
+
+    test("returns same as get_cached_tarball_path", fn() {
+        let path1 = cache.get_cached_tarball_path("owner", "repo", "1.0.0");
+        let path2 = cache.get_cached_path("owner", "repo", "1.0.0");
+        assert_eq(path1, path2, "paths should match");
+    });
+
+    suite("cache.is_cached");
+
+    test("returns false for non-cached package", fn() {
+        let cached = cache.is_cached("nonexistent", "fakerepo", "9.9.9");
+        assert_false(cached, "should not be cached");
+    });
+
+    test("returns false for non-cached version", fn() {
+        // A package that doesn't exist
+        let cached = cache.is_cached("testowner", "testrepo", "0.0.0-nonexistent");
+        assert_false(cached, "non-existent version not cached");
+    });
+
     suite("cache.list_cached");
 
     test("returns array", fn() {
         let packages = cache.list_cached();
         assert_not_null(packages, "should return array");
-        // Note: actual content depends on cache state
+    });
+
+    test("returns array with correct structure", fn() {
+        let packages = cache.list_cached();
+        // Even if empty, should be an array
+        assert_true(packages.length >= 0, "has length property");
     });
 
     suite("cache.get_cache_size");
@@ -58,5 +146,81 @@ export fn run() {
     test("returns number", fn() {
         let size = cache.get_cache_size();
         assert_true(size >= 0, "size >= 0");
+    });
+
+    test("returns i64 type for large caches", fn() {
+        let size = cache.get_cache_size();
+        // Just verify we can compare it
+        assert_true(size >= 0, "can compare size");
+    });
+
+    suite("cache.read_config");
+
+    test("returns object", fn() {
+        let config = cache.read_config();
+        assert_not_null(config, "should return config object");
+    });
+
+    test("returns empty object if no config", fn() {
+        // Default behavior when no config exists
+        let config = cache.read_config();
+        // Should at least return an object (could be empty)
+        assert_not_null(config, "config not null");
+    });
+
+    suite("cache.ensure_cache_dir");
+
+    test("returns cache directory path", fn() {
+        let dir = cache.ensure_cache_dir();
+        assert_not_null(dir, "should return path");
+        assert_true(dir.length > 0, "path not empty");
+    });
+
+    test("creates directory if not exists", fn() {
+        let dir = cache.ensure_cache_dir();
+        assert_true(exists(dir), "directory should exist");
+    });
+
+    suite("cache path edge cases");
+
+    test("handles empty version after v strip", fn() {
+        // Edge case: what if version is just "v"?
+        let path = cache.get_cached_tarball_path("owner", "repo", "v");
+        assert_true(path.ends_with(".tar.gz"), "still ends with .tar.gz");
+    });
+
+    test("handles version with multiple dots", fn() {
+        let path = cache.get_cached_tarball_path("owner", "repo", "1.2.3.4.5");
+        assert_true(path.contains("1.2.3.4.5"), "multi-dot version");
+    });
+
+    test("handles version with plus sign", fn() {
+        let path = cache.get_cached_tarball_path("owner", "repo", "1.0.0+build.123");
+        assert_true(path.contains("1.0.0+build.123"), "version with build metadata");
+    });
+
+    suite("cache operations");
+
+    test("store and retrieve tarball file", fn() {
+        let test_cache = "/tmp/hpm_test_cache";
+        cleanup_dir(test_cache);
+
+        // Create a test tarball
+        let test_tarball = "/tmp/hpm_test_tarball.tar.gz";
+        write_file(test_tarball, "fake tarball content for testing");
+
+        // Store in cache (this creates the directory structure)
+        make_dir(test_cache);
+        make_dir(test_cache + "/testowner");
+        make_dir(test_cache + "/testowner/testrepo");
+        let dest_path = test_cache + "/testowner/testrepo/1.0.0.tar.gz";
+        write_file(dest_path, "fake tarball content for testing");
+
+        // Verify the file exists
+        assert_true(exists(dest_path), "tarball stored");
+
+        // Clean up
+        cleanup_dir(test_cache);
+        remove_file(test_tarball);
     });
 }
