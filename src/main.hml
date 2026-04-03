@@ -15,7 +15,7 @@ import * as installer from "./installer.hml";
 import * as cache from "./cache.hml";
 
 // Version info
-let HPM_VERSION = "1.0.7";
+let HPM_VERSION = "1.0.9";
 
 // Exit codes
 let EXIT_SUCCESS = 0;
@@ -201,11 +201,7 @@ fn cmd_install() {
                 let versions = github.get_tags(parts.owner, parts.repo);
                 if (versions.length > 0) {
                     let sorted = semver.sort(versions);
-                    let latest = sorted[sorted.length - 1];
-                    // Remove 'v' prefix
-                    if (latest.length > 0 && latest[0] == 'v') {
-                        latest = latest.substr(1, latest.length - 1);
-                    }
+                    let latest = semver.strip_v_prefix(sorted[sorted.length - 1]);
                     version_constraint = "^" + latest;
                 }
             }
@@ -606,17 +602,11 @@ fn cmd_outdated() {
                 let versions = github.get_tags(parts.owner, parts.repo);
                 if (versions.length > 0) {
                     let sorted = semver.sort(versions);
-                    let latest = sorted[sorted.length - 1];
-                    if (latest.length > 0 && latest[0] == 'v') {
-                        latest = latest.substr(1, latest.length - 1);
-                    }
+                    let latest = semver.strip_v_prefix(sorted[sorted.length - 1]);
 
                     // Find wanted (highest satisfying constraint)
                     let parsed_constraint = semver.parse_constraint(constraint);
-                    let wanted = semver.max_satisfying(versions, parsed_constraint);
-                    if (wanted != null && wanted.length > 0 && wanted[0] == 'v') {
-                        wanted = wanted.substr(1, wanted.length - 1);
-                    }
+                    let wanted = semver.strip_v_prefix(semver.max_satisfying(versions, parsed_constraint));
                     if (wanted == null) {
                         wanted = current;
                     }
@@ -654,7 +644,6 @@ fn pad_right(s: string, width: i32): string {
 
 // hpm run
 fn cmd_run() {
-    let project_dir = get_project_dir();
     let pos_args = get_positional_args();
 
     if (pos_args.length == 0) {
@@ -662,46 +651,7 @@ fn cmd_run() {
         env.exit(EXIT_SUCCESS);
     }
 
-    let script_name = pos_args[0];
-
-    // Read manifest
-    let pkg = manifest.read_manifest(project_dir);
-    if (pkg == null) {
-        print("No package.json found.");
-        env.exit(EXIT_INVALID_MANIFEST);
-    }
-
-    if (pkg.scripts == null || pkg.scripts[script_name] == null) {
-        print("Script not found: " + script_name);
-        env.exit(EXIT_NOT_FOUND);
-    }
-
-    let script_cmd = pkg.scripts[script_name];
-    print("> " + script_cmd);
-    print("");
-
-    // Execute the script
-    // Parse command and arguments
-    let parts = script_cmd.split(" ");
-    let cmd = parts[0];
-    let cmd_args = [];
-    let i = 1;
-    while (i < parts.length) {
-        cmd_args.push(parts[i]);
-        i = i + 1;
-    }
-
-    // Fork and exec
-    let pid = fork();
-    if (pid == 0) {
-        // Child process
-        exec(cmd, cmd_args);
-        env.exit(1);  // exec failed
-    } else {
-        // Parent - wait for child
-        let status = waitpid(pid);
-        env.exit(status);
-    }
+    cmd_run_with_script(pos_args[0]);
 }
 
 // hpm test (shorthand for hpm run test)

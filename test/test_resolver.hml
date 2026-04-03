@@ -1,0 +1,127 @@
+// Tests for resolver module (unit-testable parts)
+
+import { suite, test, assert, assert_eq, assert_true, assert_false, assert_null, assert_not_null, assert_throws } from "./framework.hml";
+import * as resolver from "../src/resolver.hml";
+import { HashMap, Set } from "@stdlib/collections";
+
+export fn run() {
+    suite("resolver.detect_cycles");
+
+    test("no cycle in empty resolved", fn() {
+        let resolved = HashMap();
+        let cycle = resolver.detect_cycles(resolved);
+        assert_null(cycle, "no cycle");
+    });
+
+    test("no cycle in linear chain", fn() {
+        let resolved = HashMap();
+        let b_deps = {};
+        b_deps["owner/c"] = "^1.0.0";
+        resolved.set("owner/a", { version: "1.0.0", dependencies: { "owner/b": "^1.0.0" } });
+        resolved.set("owner/b", { version: "1.0.0", dependencies: b_deps });
+        resolved.set("owner/c", { version: "1.0.0", dependencies: null });
+
+        let cycle = resolver.detect_cycles(resolved);
+        assert_null(cycle, "no cycle in linear chain");
+    });
+
+    test("detects simple cycle", fn() {
+        let resolved = HashMap();
+        resolved.set("owner/a", { version: "1.0.0", dependencies: { "owner/b": "^1.0.0" } });
+        resolved.set("owner/b", { version: "1.0.0", dependencies: { "owner/a": "^1.0.0" } });
+
+        let cycle = resolver.detect_cycles(resolved);
+        assert_not_null(cycle, "should detect cycle");
+        assert_true(cycle.length >= 2, "cycle has at least 2 nodes");
+    });
+
+    test("detects longer cycle", fn() {
+        let resolved = HashMap();
+        resolved.set("owner/a", { version: "1.0.0", dependencies: { "owner/b": "^1.0.0" } });
+        resolved.set("owner/b", { version: "1.0.0", dependencies: { "owner/c": "^1.0.0" } });
+        resolved.set("owner/c", { version: "1.0.0", dependencies: { "owner/a": "^1.0.0" } });
+
+        let cycle = resolver.detect_cycles(resolved);
+        assert_not_null(cycle, "should detect cycle");
+    });
+
+    test("no false positive with diamond deps", fn() {
+        let resolved = HashMap();
+        resolved.set("owner/a", { version: "1.0.0", dependencies: { "owner/c": "^1.0.0" } });
+        resolved.set("owner/b", { version: "1.0.0", dependencies: { "owner/c": "^1.0.0" } });
+        resolved.set("owner/c", { version: "1.0.0", dependencies: null });
+
+        let cycle = resolver.detect_cycles(resolved);
+        assert_null(cycle, "diamond is not a cycle");
+    });
+
+    suite("resolver.build_tree");
+
+    test("builds tree for single dep", fn() {
+        let root = {
+            name: "test/root",
+            version: "1.0.0",
+            dependencies: { "owner/a": "^1.0.0" },
+            devDependencies: null
+        };
+
+        let resolved = {};
+        resolved["owner/a"] = { version: "1.0.0", dependencies: null };
+
+        let tree = resolver.build_tree(root, resolved, false);
+        assert_eq(tree.name, "test/root", "root name");
+        assert_eq(tree.children.length, 1, "one child");
+        assert_eq(tree.children[0].name, "owner/a", "child name");
+    });
+
+    test("builds tree with transitive deps", fn() {
+        let root = {
+            name: "test/root",
+            version: "1.0.0",
+            dependencies: { "owner/a": "^1.0.0" },
+            devDependencies: null
+        };
+
+        let resolved = {};
+        resolved["owner/a"] = { version: "1.0.0", dependencies: { "owner/b": "^1.0.0" } };
+        resolved["owner/b"] = { version: "2.0.0", dependencies: null };
+
+        let tree = resolver.build_tree(root, resolved, false);
+        assert_eq(tree.children.length, 1, "one root child");
+        assert_eq(tree.children[0].children.length, 1, "one transitive child");
+        assert_eq(tree.children[0].children[0].name, "owner/b", "transitive name");
+    });
+
+    suite("resolver.find_why");
+
+    test("finds direct dependency", fn() {
+        let root = {
+            name: "test/root",
+            version: "1.0.0",
+            dependencies: { "owner/a": "^1.0.0" },
+            devDependencies: null
+        };
+
+        let resolved = {};
+        resolved["owner/a"] = { version: "1.0.0", dependencies: null };
+
+        let chains = resolver.find_why("owner/a", root, resolved);
+        assert_true(chains.length > 0, "found at least one chain");
+    });
+
+    test("finds indirect dependency", fn() {
+        let root = {
+            name: "test/root",
+            version: "1.0.0",
+            dependencies: { "owner/a": "^1.0.0" },
+            devDependencies: null
+        };
+
+        let resolved = {};
+        resolved["owner/a"] = { version: "1.0.0", dependencies: { "owner/b": "^1.0.0" } };
+        resolved["owner/b"] = { version: "1.0.0", dependencies: null };
+
+        let chains = resolver.find_why("owner/b", root, resolved);
+        assert_true(chains.length > 0, "found chain for transitive dep");
+    });
+}

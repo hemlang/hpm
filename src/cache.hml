@@ -4,6 +4,12 @@ import { exists, read_file, write_file, make_dir, list_dir, remove_file, remove_
 import * as env from "@stdlib/env";
 import { parse, stringify, pretty } from "@stdlib/json";
 import { exec } from "@stdlib/process";
+import * as semver from "./semver.hml";
+
+// Strip 'v' prefix from version string for cache paths
+fn clean_version(version: string): string {
+    return semver.strip_v_prefix(version);
+}
 
 // Get cache directory path
 export fn get_cache_dir(): string {
@@ -71,13 +77,7 @@ fn ensure_dir(path: string) {
 // Get path to cached tarball
 export fn get_cached_tarball_path(owner: string, repo: string, version: string): string {
     let cache_dir = get_cache_dir();
-
-    // Remove 'v' prefix if present
-    let v = version;
-    if (v.length > 0 && v[0] == 'v') {
-        v = v.substr(1, v.length - 1);
-    }
-
+    let v = clean_version(version);
     return cache_dir + "/" + owner + "/" + repo + "/" + v + ".tar.gz";
 }
 
@@ -95,12 +95,7 @@ export fn get_cached_path(owner: string, repo: string, version: string): string 
 // Store tarball in cache from data
 export fn store_tarball(owner: string, repo: string, version: string, data) {
     let cache_dir = get_cache_dir();
-
-    // Remove 'v' prefix if present
-    let v = version;
-    if (v.length > 0 && v[0] == 'v') {
-        v = v.substr(1, v.length - 1);
-    }
+    let v = clean_version(version);
 
     // Ensure directory structure
     ensure_dir(cache_dir + "/" + owner);
@@ -111,10 +106,15 @@ export fn store_tarball(owner: string, repo: string, version: string, data) {
 
     // Data might be string or buffer, handle both
     let f = open(path, "w");
-    if (typeof(data) == "buffer") {
-        f.write_bytes(data);
-    } else {
-        f.write(data);
+    try {
+        if (typeof(data) == "buffer") {
+            f.write_bytes(data);
+        } else {
+            f.write(data);
+        }
+    } catch (e) {
+        f.close();
+        throw e;
     }
     f.close();
 
@@ -124,12 +124,7 @@ export fn store_tarball(owner: string, repo: string, version: string, data) {
 // Store tarball in cache from a file (copies the file)
 export fn store_tarball_file(owner: string, repo: string, version: string, src_path: string) {
     let cache_dir = get_cache_dir();
-
-    // Remove 'v' prefix if present
-    let v = version;
-    if (v.length > 0 && v[0] == 'v') {
-        v = v.substr(1, v.length - 1);
-    }
+    let v = clean_version(version);
 
     // Ensure directory structure
     ensure_dir(cache_dir + "/" + owner);
@@ -157,7 +152,13 @@ export fn read_tarball(owner: string, repo: string, version: string) {
     }
 
     let f = open(path, "r");
-    let content = f.read();
+    let content = null;
+    try {
+        content = f.read();
+    } catch (e) {
+        f.close();
+        throw e;
+    }
     f.close();
 
     return content;

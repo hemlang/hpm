@@ -172,10 +172,7 @@ fn resolve_version(pkg_name: string, pkg_constraints: array) {
     let tarball_url = github.get_tarball_url(parts.owner, parts.repo, best_version);
 
     // Remove 'v' prefix for clean version string
-    let clean_version = best_version;
-    if (clean_version.length > 0 && clean_version[0] == 'v') {
-        clean_version = clean_version.substr(1, clean_version.length - 1);
-    }
+    let clean_version = semver.strip_v_prefix(best_version);
 
     return {
         version: clean_version,

@@ -88,23 +88,29 @@ export fn install_package(pkg_name: string, resolution, project_dir: string, ver
     }
     make_dir(extract_dir);
 
-    // Extract tarball using system tar
-    let tar_result = exec("tar", ["-xzf", tarball_path, "-C", extract_dir]);
-    if (tar_result.exit_code != 0) {
-        throw "Failed to extract tarball: tar exited with status " + tar_result.exit_code;
-    }
+    // Extract tarball using system tar (cleanup temp dir on any failure)
+    try {
+        let tar_result = exec("tar", ["-xzf", tarball_path, "-C", extract_dir]);
+        if (tar_result.exit_code != 0) {
+            throw "Failed to extract tarball: tar exited with status " + tar_result.exit_code;
+        }
 
-    // Find the extracted directory (GitHub tarballs have a root dir like "repo-version/")
-    let extracted_dirs = list_dir(extract_dir);
-    if (extracted_dirs.length == 0) {
-        throw "Failed to extract tarball: no files extracted";
-    }
-    let root_dir = extract_dir + "/" + extracted_dirs[0];
+        // Find the extracted directory (GitHub tarballs have a root dir like "repo-version/")
+        let extracted_dirs = list_dir(extract_dir);
+        if (extracted_dirs == null || extracted_dirs.length == 0) {
+            throw "Failed to extract tarball: no files extracted";
+        }
+        let root_dir = extract_dir + "/" + extracted_dirs[0];
 
-    // Copy contents to install_dir
-    let copy_result = exec("cp", ["-r", root_dir + "/.", install_dir]);
-    if (copy_result.exit_code != 0) {
-        throw "Failed to copy extracted files";
+        // Copy contents to install_dir
+        let copy_result = exec("cp", ["-r", root_dir + "/.", install_dir]);
+        if (copy_result.exit_code != 0) {
+            throw "Failed to copy extracted files";
+        }
+    } catch (e) {
+        // Clean up temp dir before re-throwing
+        remove_dir_recursive(extract_dir);
+        throw e;
     }
 
     // Clean up temp extraction dir
@@ -119,23 +125,12 @@ export fn install_package(pkg_name: string, resolution, project_dir: string, ver
             integrity = "sha256-" + hash;
         }
     } catch (e) {
-        // Keep unknown integrity if calculation fails
+        if (verbose) {
+            print("    Warning: Could not calculate integrity hash: " + e);
+        }
     }
 
     return integrity;
-}
-
-// Helper to find last occurrence of character
-fn find_last(s: string, ch: rune): i32 {
-    let last = -1;
-    let i = 0;
-    while (i < s.length) {
-        if (s[i] == ch) {
-            last = i;
-        }
-        i = i + 1;
-    }
-    return last;
 }
 
 // Ensure directory exists recursively

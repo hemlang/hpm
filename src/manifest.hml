@@ -224,6 +224,34 @@ export fn parse_specifier(spec: string) {
     };
 }
 
+// Validate that a name component (owner or repo) contains only safe characters.
+// Prevents path traversal and command injection via malicious package names.
+export fn is_valid_name_component(s: string): bool {
+    if (s == null || s.length == 0) {
+        return false;
+    }
+
+    // Reject path traversal attempts
+    if (s == "." || s == "..") {
+        return false;
+    }
+
+    let i = 0;
+    while (i < s.length) {
+        let ch = s[i];
+        let ok = (ch >= 'a' && ch <= 'z') ||
+                 (ch >= 'A' && ch <= 'Z') ||
+                 (ch >= '0' && ch <= '9') ||
+                 ch == '-' || ch == '_' || ch == '.';
+        if (!ok) {
+            return false;
+        }
+        i = i + 1;
+    }
+
+    return true;
+}
+
 // Split package name into owner and repo
 export fn split_name(name: string) {
     let slash_pos = name.find("/");
@@ -231,8 +259,16 @@ export fn split_name(name: string) {
         return null;
     }
 
+    let owner = name.substr(0, slash_pos);
+    let repo = name.substr(slash_pos + 1, name.length - slash_pos - 1);
+
+    // Validate components to prevent path traversal
+    if (!is_valid_name_component(owner) || !is_valid_name_component(repo)) {
+        return null;
+    }
+
     return {
-        owner: name.substr(0, slash_pos),
-        repo: name.substr(slash_pos + 1, name.length - slash_pos - 1)
+        owner: owner,
+        repo: repo
     };
 }

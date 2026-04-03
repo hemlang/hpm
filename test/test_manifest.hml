@@ -106,6 +106,70 @@ export fn run() {
         assert_null(m.dependencies["owner/dep"], "dependency removed");
     });
 
+    suite("manifest.is_valid_name_component");
+
+    test("accepts valid name", fn() {
+        assert_true(manifest.is_valid_name_component("my-repo"), "valid name");
+    });
+
+    test("accepts alphanumeric with dots", fn() {
+        assert_true(manifest.is_valid_name_component("my.repo.v2"), "dots allowed");
+    });
+
+    test("accepts underscores", fn() {
+        assert_true(manifest.is_valid_name_component("my_repo"), "underscores allowed");
+    });
+
+    test("rejects empty string", fn() {
+        assert_false(manifest.is_valid_name_component(""), "empty rejected");
+    });
+
+    test("rejects dot-dot (path traversal)", fn() {
+        assert_false(manifest.is_valid_name_component(".."), ".. rejected");
+    });
+
+    test("rejects single dot", fn() {
+        assert_false(manifest.is_valid_name_component("."), ". rejected");
+    });
+
+    test("rejects slashes", fn() {
+        assert_false(manifest.is_valid_name_component("a/b"), "slash rejected");
+    });
+
+    test("rejects spaces", fn() {
+        assert_false(manifest.is_valid_name_component("a b"), "space rejected");
+    });
+
+    test("rejects shell metacharacters", fn() {
+        assert_false(manifest.is_valid_name_component("a;rm"), "semicolon rejected");
+        assert_false(manifest.is_valid_name_component("a&b"), "ampersand rejected");
+        assert_false(manifest.is_valid_name_component("a|b"), "pipe rejected");
+    });
+
+    suite("manifest.split_name (validation)");
+
+    test("rejects path traversal in owner", fn() {
+        let parts = manifest.split_name("../etc/passwd");
+        assert_null(parts, "path traversal rejected");
+    });
+
+    test("rejects empty owner", fn() {
+        let parts = manifest.split_name("/repo");
+        assert_null(parts, "empty owner rejected");
+    });
+
+    test("rejects empty repo", fn() {
+        let parts = manifest.split_name("owner/");
+        assert_null(parts, "empty repo rejected");
+    });
+
+    test("accepts valid owner/repo", fn() {
+        let parts = manifest.split_name("hemlang/sprout");
+        assert_not_null(parts, "valid name accepted");
+        assert_eq(parts.owner, "hemlang", "owner");
+        assert_eq(parts.repo, "sprout", "repo");
+    });
+
     suite("manifest.get_all_dependencies");
 
     test("gets only regular deps", fn() {

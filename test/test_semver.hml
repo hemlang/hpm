@@ -209,6 +209,95 @@ export fn run() {
         assert_null(max, "none satisfy");
     });
 
+    suite("semver.satisfies (edge cases)");
+
+    test("caret with major 0", fn() {
+        let c = semver.parse_constraint("^0.2.3");
+
+        assert_true(semver.satisfies(semver.parse("0.2.3"), c), "0.2.3");
+        assert_true(semver.satisfies(semver.parse("0.2.9"), c), "0.2.9");
+        assert_false(semver.satisfies(semver.parse("0.3.0"), c), "0.3.0 too high");
+        assert_false(semver.satisfies(semver.parse("1.0.0"), c), "1.0.0 too high");
+    });
+
+    test("caret with 0.0.x", fn() {
+        let c = semver.parse_constraint("^0.0.3");
+
+        assert_true(semver.satisfies(semver.parse("0.0.3"), c), "0.0.3 exact");
+        assert_false(semver.satisfies(semver.parse("0.0.4"), c), "0.0.4 too high");
+        assert_false(semver.satisfies(semver.parse("0.1.0"), c), "0.1.0 too high");
+    });
+
+    test("range constraint", fn() {
+        let c = semver.parse_constraint(">=1.0.0 <2.0.0");
+
+        assert_true(semver.satisfies(semver.parse("1.0.0"), c), "1.0.0");
+        assert_true(semver.satisfies(semver.parse("1.9.9"), c), "1.9.9");
+        assert_false(semver.satisfies(semver.parse("0.9.0"), c), "0.9.0 too low");
+        assert_false(semver.satisfies(semver.parse("2.0.0"), c), "2.0.0 too high");
+    });
+
+    test("lt constraint", fn() {
+        let c = semver.parse_constraint("<2.0.0");
+        assert_true(semver.satisfies(semver.parse("1.9.9"), c), "1.9.9");
+        assert_false(semver.satisfies(semver.parse("2.0.0"), c), "2.0.0");
+    });
+
+    test("lte constraint", fn() {
+        let c = semver.parse_constraint("<=2.0.0");
+        assert_true(semver.satisfies(semver.parse("2.0.0"), c), "2.0.0");
+        assert_false(semver.satisfies(semver.parse("2.0.1"), c), "2.0.1");
+    });
+
+    test("gt constraint", fn() {
+        let c = semver.parse_constraint(">1.0.0");
+        assert_true(semver.satisfies(semver.parse("1.0.1"), c), "1.0.1");
+        assert_false(semver.satisfies(semver.parse("1.0.0"), c), "1.0.0 not strictly greater");
+    });
+
+    suite("semver.strip_v_prefix");
+
+    test("strips v prefix", fn() {
+        assert_eq(semver.strip_v_prefix("v1.0.0"), "1.0.0", "strips v");
+    });
+
+    test("strips V prefix", fn() {
+        assert_eq(semver.strip_v_prefix("V1.0.0"), "1.0.0", "strips V");
+    });
+
+    test("no-op without prefix", fn() {
+        assert_eq(semver.strip_v_prefix("1.0.0"), "1.0.0", "no change");
+    });
+
+    test("handles null", fn() {
+        assert_null(semver.strip_v_prefix(null), "null returns null");
+    });
+
+    test("handles empty string", fn() {
+        assert_eq(semver.strip_v_prefix(""), "", "empty stays empty");
+    });
+
+    suite("semver.parse (edge cases)");
+
+    test("parses version without patch", fn() {
+        let v = semver.parse("1.2");
+        assert_eq(v.major, 1, "major");
+        assert_eq(v.minor, 2, "minor");
+        assert_eq(v.patch, 0, "patch defaults to 0");
+    });
+
+    test("parses version with only major", fn() {
+        let v = semver.parse("3");
+        assert_eq(v.major, 3, "major");
+        assert_eq(v.minor, 0, "minor defaults to 0");
+        assert_eq(v.patch, 0, "patch defaults to 0");
+    });
+
+    test("returns null for null input", fn() {
+        let v = semver.parse(null);
+        assert_null(v, "null returns null");
+    });
+
     suite("semver.sort");
 
     test("sorts versions ascending", fn() {
@@ -218,5 +307,18 @@ export fn run() {
         assert_eq(sorted[1], "v1.1.0", "second");
         assert_eq(sorted[2], "v1.2.0", "third");
         assert_eq(sorted[3], "v2.0.0", "fourth");
+    });
+
+    test("sorts single element", fn() {
+        let versions = ["v1.0.0"];
+        let sorted = semver.sort(versions);
+        assert_eq(sorted.length, 1, "length");
+        assert_eq(sorted[0], "v1.0.0", "single");
+    });
+
+    test("sorts empty array", fn() {
+        let versions = [];
+        let sorted = semver.sort(versions);
+        assert_eq(sorted.length, 0, "empty");
     });
 }

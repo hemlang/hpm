@@ -392,6 +392,14 @@ export fn sort(versions: array): array {
     return result;
 }
 
+// Strip leading 'v' or 'V' prefix from a version string
+export fn strip_v_prefix(s: string): string {
+    if (s != null && s.length > 0 && (s[0] == 'v' || s[0] == 'V')) {
+        return s.substr(1, s.length - 1);
+    }
+    return s;
+}
+
 // Check if two constraints have any overlap
 export fn constraints_overlap(c1, c2): bool {
     // This is a simplified check - would need more sophisticated analysis

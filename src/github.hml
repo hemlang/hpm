@@ -56,7 +56,7 @@ fn github_request(url: string) {
     }
 
     headers.push("Accept: application/vnd.github.v3+json");
-    headers.push("User-Agent: hpm/1.0.7");
+    headers.push("User-Agent: hpm/1.0.9");
 
     let retries = 0;
     let backoff_ms = INITIAL_BACKOFF_MS;
@@ -252,10 +252,15 @@ export fn download_tarball(owner: string, repo: string, version: string): string
 
     // Write binary data to file (use file handle for binary support)
     let f = open(tmpfile, "w");
-    if (typeof(response.body) == "buffer") {
-        f.write_bytes(response.body);
-    } else {
-        f.write(response.body);
+    try {
+        if (typeof(response.body) == "buffer") {
+            f.write_bytes(response.body);
+        } else {
+            f.write(response.body);
+        }
+    } catch (e) {
+        f.close();
+        throw e;
     }
     f.close();
 
@@ -278,7 +283,7 @@ export fn repo_exists(owner: string, repo: string): bool {
     }
 
     headers.push("Accept: application/vnd.github.v3+json");
-    headers.push("User-Agent: hpm/1.0.7");
+    headers.push("User-Agent: hpm/1.0.9");
 
     let retries = 0;
     let backoff_ms = INITIAL_BACKOFF_MS;
