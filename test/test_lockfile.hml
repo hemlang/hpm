@@ -9,7 +9,7 @@ export fn run() {
     test("creates empty lockfile", fn() {
         let lock = lockfile.create_empty();
         assert_eq(lock.lockVersion, 1, "lockVersion");
-        assert_eq(lock.hemlock, "1.0.0", "hemlock");
+        assert_eq(lock.hemlock, "1.1.0", "hemlock");
         assert_not_null(lock.dependencies, "dependencies");
     });
 
