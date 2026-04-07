@@ -1,6 +1,6 @@
 // hpm - Global cache management
 
-import { exists, read_file, write_file, make_dir, list_dir, remove_file, remove_dir, is_dir, file_stat } from "@stdlib/fs";
+import { exists, read_file, write_file, make_dir, list_dir, remove_file, remove_dir, is_dir, file_stat, open } from "@stdlib/fs";
 import * as env from "@stdlib/env";
 import { parse, stringify, pretty } from "@stdlib/json";
 import { exec } from "@stdlib/process";

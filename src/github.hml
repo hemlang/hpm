@@ -3,13 +3,21 @@
 import { get, get_binary, is_success } from "@stdlib/http";
 import { parse } from "@stdlib/json";
 import * as env from "@stdlib/env";
-import { exists, read_file, write_file } from "@stdlib/fs";
+import { exists, read_file, write_file, open } from "@stdlib/fs";
 import { sleep, now } from "@stdlib/time";
 import { get_pid } from "@stdlib/process";
 
 // Retry configuration
 let MAX_RETRIES = 4;
-let INITIAL_BACKOFF_MS = 1000;  // 1 second
+let INITIAL_BACKOFF_S = 1;  // 1 second
+
+// User-Agent string, set via init()
+let USER_AGENT = "hpm";
+
+// Initialize with version from main
+export fn init(version: string) {
+    USER_AGENT = "hpm/" + version;
+}
 
 // Generate a unique suffix for temp files using PID and timestamp
 fn unique_suffix(): string {
@@ -56,10 +64,10 @@ fn github_request(url: string) {
     }
 
     headers.push("Accept: application/vnd.github.v3+json");
-    headers.push("User-Agent: hpm/1.1.0");
+    headers.push("User-Agent: " + USER_AGENT);
 
     let retries = 0;
-    let backoff_ms = INITIAL_BACKOFF_MS;
+    let backoff_s = INITIAL_BACKOFF_S;
 
     while (retries <= MAX_RETRIES) {
         let response = get(url, headers);
@@ -68,8 +76,8 @@ fn github_request(url: string) {
             // Rate limit - retry with exponential backoff
             if (retries < MAX_RETRIES) {
                 retries = retries + 1;
-                sleep(backoff_ms);
-                backoff_ms = backoff_ms * 2;  // Exponential backoff: 1s, 2s, 4s, 8s
+                sleep(backoff_s);
+                backoff_s = backoff_s * 2;  // Exponential backoff: 1s, 2s, 4s, 8s
                 continue;
             }
             throw "GitHub API rate limit exceeded after " + MAX_RETRIES + " retries. Set GITHUB_TOKEN to increase limit.";
@@ -83,8 +91,8 @@ fn github_request(url: string) {
         if (response.status_code >= 500 || response.status_code == 0) {
             if (retries < MAX_RETRIES) {
                 retries = retries + 1;
-                sleep(backoff_ms);
-                backoff_ms = backoff_ms * 2;
+                sleep(backoff_s);
+                backoff_s = backoff_s * 2;
                 continue;
             }
             throw "GitHub API error: HTTP " + response.status_code + " after " + MAX_RETRIES + " retries";
@@ -278,10 +286,10 @@ export fn repo_exists(owner: string, repo: string): bool {
     }
 
     headers.push("Accept: application/vnd.github.v3+json");
-    headers.push("User-Agent: hpm/1.1.0");
+    headers.push("User-Agent: " + USER_AGENT);
 
     let retries = 0;
-    let backoff_ms = INITIAL_BACKOFF_MS;
+    let backoff_s = INITIAL_BACKOFF_S;
 
     while (retries <= MAX_RETRIES) {
         let response = get(url, headers);
@@ -290,8 +298,8 @@ export fn repo_exists(owner: string, repo: string): bool {
         if (response.status_code == 403 || response.status_code >= 500 || response.status_code == 0) {
             if (retries < MAX_RETRIES) {
                 retries = retries + 1;
-                sleep(backoff_ms);
-                backoff_ms = backoff_ms * 2;
+                sleep(backoff_s);
+                backoff_s = backoff_s * 2;
                 continue;
             }
         }
