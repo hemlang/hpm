@@ -1,0 +1,208 @@
+// Tests for resolver module (cycle detection, tree building, find_why)
+
+import { suite, test, assert, assert_eq, assert_true, assert_false, assert_null, assert_not_null } from "./framework.hml";
+import { HashMap } from "@stdlib/collections";
+import * as resolver from "../src/resolver.hml";
+
+// Helper: build a deps object from parallel arrays of names and constraints
+fn make_deps(names: array, constraints: array) {
+    if (names.length == 0) {
+        return null;
+    }
+    let deps = {};
+    let i = 0;
+    while (i < names.length) {
+        deps[names[i]] = constraints[i];
+        i = i + 1;
+    }
+    return deps;
+}
+
+// Helper: add a resolved entry to a HashMap
+fn add_entry(resolved, name: string, version: string, dep_names: array, dep_constraints: array) {
+    let deps = make_deps(dep_names, dep_constraints);
+    resolved.set(name, {
+        version: version,
+        resolved: "https://github.com/fake/archive/v" + version + ".tar.gz",
+        integrity: "",
+        dependencies: deps
+    });
+}
+
+fn mock_manifest(name: string, version: string, dep_names: array, dep_constraints: array, dev_names: array, dev_constraints: array) {
+    let deps = {};
+    let i = 0;
+    while (i < dep_names.length) {
+        deps[dep_names[i]] = dep_constraints[i];
+        i = i + 1;
+    }
+    let dev_deps = {};
+    i = 0;
+    while (i < dev_names.length) {
+        dev_deps[dev_names[i]] = dev_constraints[i];
+        i = i + 1;
+    }
+    return {
+        name: name,
+        version: version,
+        dependencies: deps,
+        devDependencies: dev_deps
+    };
+}
+
+export fn run() {
+    // ========== detect_cycles ==========
+
+    suite("resolver.detect_cycles");
+
+    test("no cycle in empty resolved", fn() {
+        let resolved = HashMap();
+        let cycle = resolver.detect_cycles(resolved);
+        assert_null(cycle, "empty resolved has no cycle");
+    });
+
+    test("no cycle with single package", fn() {
+        let resolved = HashMap();
+        add_entry(resolved, "a/pkg", "1.0.0", [], []);
+        let cycle = resolver.detect_cycles(resolved);
+        assert_null(cycle, "single package has no cycle");
+    });
+
+    test("no cycle in linear chain", fn() {
+        let resolved = HashMap();
+        add_entry(resolved, "a/pkg1", "1.0.0", ["a/pkg2"], ["^1.0.0"]);
+        add_entry(resolved, "a/pkg2", "1.0.0", ["a/pkg3"], ["^1.0.0"]);
+        add_entry(resolved, "a/pkg3", "1.0.0", [], []);
+        let cycle = resolver.detect_cycles(resolved);
+        assert_null(cycle, "linear chain has no cycle");
+    });
+
+    test("no cycle in diamond dependency", fn() {
+        let resolved = HashMap();
+        add_entry(resolved, "a/root", "1.0.0", ["a/left", "a/right"], ["^1.0.0", "^1.0.0"]);
+        add_entry(resolved, "a/left", "1.0.0", ["a/bottom"], ["^1.0.0"]);
+        add_entry(resolved, "a/right", "1.0.0", ["a/bottom"], ["^1.0.0"]);
+        add_entry(resolved, "a/bottom", "1.0.0", [], []);
+        let cycle = resolver.detect_cycles(resolved);
+        assert_null(cycle, "diamond has no cycle");
+    });
+
+    test("detects simple A->B->A cycle", fn() {
+        let resolved = HashMap();
+        add_entry(resolved, "a/pkg1", "1.0.0", ["a/pkg2"], ["^1.0.0"]);
+        add_entry(resolved, "a/pkg2", "1.0.0", ["a/pkg1"], ["^1.0.0"]);
+        let cycle = resolver.detect_cycles(resolved);
+        assert_not_null(cycle, "should detect cycle");
+        assert_true(cycle.length >= 2, "cycle should have at least 2 entries");
+    });
+
+    test("detects A->B->C->A cycle", fn() {
+        let resolved = HashMap();
+        add_entry(resolved, "a/pkg1", "1.0.0", ["a/pkg2"], ["^1.0.0"]);
+        add_entry(resolved, "a/pkg2", "1.0.0", ["a/pkg3"], ["^1.0.0"]);
+        add_entry(resolved, "a/pkg3", "1.0.0", ["a/pkg1"], ["^1.0.0"]);
+        let cycle = resolver.detect_cycles(resolved);
+        assert_not_null(cycle, "should detect 3-node cycle");
+    });
+
+    // ========== build_tree ==========
+
+    suite("resolver.build_tree");
+
+    test("builds tree for package with no deps", fn() {
+        let m = mock_manifest("my/app", "1.0.0", [], [], [], []);
+        let resolved = HashMap();
+        let tree = resolver.build_tree(m, resolved, false);
+        assert_eq(tree.name, "my/app", "tree root name");
+        assert_eq(tree.version, "1.0.0", "tree root version");
+        assert_eq(tree.children.length, 0, "no children");
+    });
+
+    test("builds tree with direct deps", fn() {
+        let m = mock_manifest("my/app", "1.0.0", ["a/lib"], ["^1.0.0"], [], []);
+        let resolved = HashMap();
+        add_entry(resolved, "a/lib", "1.2.0", [], []);
+        let tree = resolver.build_tree(m, resolved, false);
+        assert_eq(tree.children.length, 1, "one child");
+        assert_eq(tree.children[0].name, "a/lib", "child name");
+        assert_eq(tree.children[0].version, "1.2.0", "child version");
+    });
+
+    test("builds tree with transitive deps", fn() {
+        let m = mock_manifest("my/app", "1.0.0", ["a/lib"], ["^1.0.0"], [], []);
+        let resolved = HashMap();
+        add_entry(resolved, "a/lib", "1.0.0", ["a/util"], ["^2.0.0"]);
+        add_entry(resolved, "a/util", "2.1.0", [], []);
+        let tree = resolver.build_tree(m, resolved, false);
+        assert_eq(tree.children.length, 1, "one direct child");
+        assert_eq(tree.children[0].children.length, 1, "one transitive child");
+        assert_eq(tree.children[0].children[0].name, "a/util", "transitive name");
+        assert_eq(tree.children[0].children[0].version, "2.1.0", "transitive version");
+    });
+
+    test("includes dev deps when requested", fn() {
+        let m = mock_manifest("my/app", "1.0.0", ["a/lib"], ["^1.0.0"], ["a/test"], ["^1.0.0"]);
+        let resolved = HashMap();
+        add_entry(resolved, "a/lib", "1.0.0", [], []);
+        add_entry(resolved, "a/test", "1.0.0", [], []);
+
+        let tree_no_dev = resolver.build_tree(m, resolved, false);
+        assert_eq(tree_no_dev.children.length, 1, "without dev: one child");
+
+        let tree_with_dev = resolver.build_tree(m, resolved, true);
+        assert_eq(tree_with_dev.children.length, 2, "with dev: two children");
+    });
+
+    test("handles circular deps in tree without infinite recursion", fn() {
+        let m = mock_manifest("my/app", "1.0.0", ["a/pkg1"], ["^1.0.0"], [], []);
+        let resolved = HashMap();
+        add_entry(resolved, "a/pkg1", "1.0.0", ["a/pkg2"], ["^1.0.0"]);
+        add_entry(resolved, "a/pkg2", "1.0.0", ["a/pkg1"], ["^1.0.0"]);
+        let tree = resolver.build_tree(m, resolved, false);
+        assert_eq(tree.children.length, 1, "one direct child");
+        let child = tree.children[0];
+        assert_eq(child.name, "a/pkg1", "first child");
+        assert_eq(child.children.length, 1, "pkg1 has child pkg2");
+        let grandchild = child.children[0];
+        assert_eq(grandchild.name, "a/pkg2", "grandchild is pkg2");
+        // pkg2 depends on pkg1 again - should be marked circular
+        assert_eq(grandchild.children.length, 1, "pkg2 has child");
+        assert_true(grandchild.children[0].circular == true, "circular flag set");
+    });
+
+    // ========== find_why ==========
+
+    suite("resolver.find_why");
+
+    test("finds direct dependency", fn() {
+        let m = mock_manifest("my/app", "1.0.0", ["a/lib"], ["^1.0.0"], [], []);
+        let resolved = HashMap();
+        add_entry(resolved, "a/lib", "1.0.0", [], []);
+        let chains = resolver.find_why("a/lib", m, resolved);
+        assert_true(chains.length > 0, "should find at least one chain");
+    });
+
+    test("finds transitive dependency", fn() {
+        let m = mock_manifest("my/app", "1.0.0", ["a/lib"], ["^1.0.0"], [], []);
+        let resolved = HashMap();
+        add_entry(resolved, "a/lib", "1.0.0", ["a/util"], ["^1.0.0"]);
+        add_entry(resolved, "a/util", "1.0.0", [], []);
+        let chains = resolver.find_why("a/util", m, resolved);
+        assert_true(chains.length > 0, "should find transitive chain");
+    });
+
+    test("returns empty for unknown package", fn() {
+        let m = mock_manifest("my/app", "1.0.0", [], [], [], []);
+        let resolved = HashMap();
+        let chains = resolver.find_why("a/nonexistent", m, resolved);
+        assert_eq(chains.length, 0, "no chains for unknown package");
+    });
+
+    test("finds dev dependency", fn() {
+        let m = mock_manifest("my/app", "1.0.0", [], [], ["a/test-lib"], ["^1.0.0"]);
+        let resolved = HashMap();
+        add_entry(resolved, "a/test-lib", "1.0.0", [], []);
+        let chains = resolver.find_why("a/test-lib", m, resolved);
+        assert_true(chains.length > 0, "should find dev dependency chain");
+    });
+}

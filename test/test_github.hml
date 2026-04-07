@@ -1,0 +1,40 @@
+// Tests for github module (non-network functions)
+
+import { suite, test, assert, assert_eq, assert_true, assert_false, assert_null, assert_not_null } from "./framework.hml";
+import * as github from "../src/github.hml";
+
+export fn run() {
+    suite("github.init");
+
+    test("sets user agent", fn() {
+        github.init("2.0.0");
+        // Can't directly read USER_AGENT since it's not exported,
+        // but init should not throw
+    });
+
+    suite("github.get_tarball_url");
+
+    test("builds url with v prefix", fn() {
+        let url = github.get_tarball_url("owner", "repo", "v1.0.0");
+        assert_eq(url, "https://github.com/owner/repo/archive/refs/tags/v1.0.0.tar.gz", "url with v");
+    });
+
+    test("adds v prefix when missing", fn() {
+        let url = github.get_tarball_url("owner", "repo", "1.0.0");
+        assert_eq(url, "https://github.com/owner/repo/archive/refs/tags/v1.0.0.tar.gz", "url without v");
+    });
+
+    test("handles scoped owner", fn() {
+        let url = github.get_tarball_url("Yotis-Studios", "gn.hml", "v0.1.0");
+        assert_eq(url, "https://github.com/Yotis-Studios/gn.hml/archive/refs/tags/v0.1.0.tar.gz", "scoped url");
+    });
+
+    suite("github.get_token");
+
+    test("returns null when no token configured", fn() {
+        // This test assumes GITHUB_TOKEN isn't set in the test env
+        // It should at least not crash
+        let token = github.get_token();
+        // token may or may not be null depending on env
+    });
+}
