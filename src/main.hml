@@ -4,7 +4,7 @@
 import * as env from "@stdlib/env";
 import { exists, read_file, cwd } from "@stdlib/fs";
 import { parse } from "@stdlib/json";
-import { fork, exec, waitpid } from "@stdlib/process";
+import { fork, exec, exec_argv, waitpid } from "@stdlib/process";
 
 import * as manifest from "./manifest.hml";
 import * as lockfile from "./lockfile.hml";
@@ -15,7 +15,7 @@ import * as installer from "./installer.hml";
 import * as cache from "./cache.hml";
 
 // Version info
-let HPM_VERSION = "1.1.1";
+let HPM_VERSION = "1.2.0";
 github.init(HPM_VERSION);
 
 // Exit codes
@@ -681,28 +681,18 @@ fn cmd_run() {
     print("> " + script_cmd);
     print("");
 
-    // Execute the script
-    // Parse command and arguments
-    let parts = script_cmd.split(" ");
-    let cmd = parts[0];
-    let cmd_args = [];
-    let i = 1;
-    while (i < parts.length) {
-        cmd_args.push(parts[i]);
-        i = i + 1;
+    // Run the script through /bin/sh so operators like `&&`, `|`, and
+    // redirects work the way users expect (matches npm/yarn behaviour).
+    // exec_argv captures output, so we write it to our stdout/stderr
+    // when the command finishes and forward the exit code.
+    let result = exec_argv(["/bin/sh", "-c", script_cmd]);
+    if (result.output != null && result.output.length > 0) {
+        write(result.output);
     }
-
-    // Fork and exec
-    let pid = fork();
-    if (pid == 0) {
-        // Child process
-        exec(cmd, cmd_args);
-        env.exit(1);  // exec failed
-    } else {
-        // Parent - wait for child
-        let status = waitpid(pid);
-        env.exit(status);
+    if (result.stderr != null && result.stderr.length > 0) {
+        eprint(result.stderr);
     }
+    env.exit(result.exit_code);
 }
 
 // hpm test (shorthand for hpm run test)
@@ -730,24 +720,16 @@ fn cmd_run_with_script(script_name: string) {
     print("> " + script_cmd);
     print("");
 
-    // Execute the script
-    let parts = script_cmd.split(" ");
-    let cmd = parts[0];
-    let cmd_args = [];
-    let i = 1;
-    while (i < parts.length) {
-        cmd_args.push(parts[i]);
-        i = i + 1;
+    // Run the script through /bin/sh so operators like `&&`, `|`, and
+    // redirects work the way users expect (matches npm/yarn behaviour).
+    let result = exec_argv(["/bin/sh", "-c", script_cmd]);
+    if (result.output != null && result.output.length > 0) {
+        write(result.output);
     }
-
-    let pid = fork();
-    if (pid == 0) {
-        exec(cmd, cmd_args);
-        env.exit(1);
-    } else {
-        let status = waitpid(pid);
-        env.exit(status);
+    if (result.stderr != null && result.stderr.length > 0) {
+        eprint(result.stderr);
     }
+    env.exit(result.exit_code);
 }
 
 // hpm why
