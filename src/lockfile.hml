@@ -10,7 +10,7 @@ let LOCK_VERSION = 1;
 export fn create_empty() {
     return {
         lockVersion: LOCK_VERSION,
-        hemlock: "1.1.0",
+        hemlock: "2.7.0",
         dependencies: {}
     };
 }

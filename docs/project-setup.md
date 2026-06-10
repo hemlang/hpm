@@ -229,7 +229,7 @@ The lock file is automatically generated and should be committed to version cont
 ```json
 {
   "lockVersion": 1,
-  "hemlock": "1.0.0",
+  "hemlock": "2.7.0",
   "dependencies": {
     "hemlang/sprout": {
       "version": "2.1.0",

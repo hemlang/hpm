@@ -15,7 +15,7 @@ import * as installer from "./installer.hml";
 import * as cache from "./cache.hml";
 
 // Version info
-let HPM_VERSION = "1.2.0";
+let HPM_VERSION = "1.2.1";
 github.init(HPM_VERSION);
 
 // Exit codes
