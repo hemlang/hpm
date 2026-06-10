@@ -54,6 +54,16 @@ export fn get_token() {
     return null;
 }
 
+// Perform a GET, converting thrown network errors (connection failure,
+// timeout) into a retryable status-0 response so retry loops can handle them
+fn try_get(url: string, headers) {
+    try {
+        return get(url, headers);
+    } catch (e) {
+        return { status_code: 0, headers: [], body: "" };
+    }
+}
+
 // Make an authenticated GitHub API request with retry logic
 fn github_request(url: string) {
     let headers = [];
@@ -70,7 +80,7 @@ fn github_request(url: string) {
     let backoff_s = INITIAL_BACKOFF_S;
 
     while (retries <= MAX_RETRIES) {
-        let response = get(url, headers);
+        let response = try_get(url, headers);
 
         if (response.status_code == 403) {
             // Rate limit - retry with exponential backoff
@@ -94,6 +104,9 @@ fn github_request(url: string) {
                 sleep(backoff_s);
                 backoff_s = backoff_s * 2;
                 continue;
+            }
+            if (response.status_code == 0) {
+                throw "GitHub API request failed (network error) after " + MAX_RETRIES + " retries";
             }
             throw "GitHub API error: HTTP " + response.status_code + " after " + MAX_RETRIES + " retries";
         }
@@ -292,9 +305,9 @@ export fn repo_exists(owner: string, repo: string): bool {
     let backoff_s = INITIAL_BACKOFF_S;
 
     while (retries <= MAX_RETRIES) {
-        let response = get(url, headers);
+        let response = try_get(url, headers);
 
-        // Retry on rate limit or server errors
+        // Retry on rate limit, server errors, or network failures
         if (response.status_code == 403 || response.status_code >= 500 || response.status_code == 0) {
             if (retries < MAX_RETRIES) {
                 retries = retries + 1;
